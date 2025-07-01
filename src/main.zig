@@ -2,21 +2,16 @@ const std = @import("std");
 const zlox = @import("zlox");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    var vm = zlox.vm.VM.init();
+    defer vm.deinit();
 
-    var chk = zlox.chunk.Chunk.init(allocator);
-    defer chk.deinit();
+    var chunk = zlox.chunk.Chunk.init(std.heap.page_allocator);
+    defer chunk.deinit();
 
-    try chk.addConstant(1.2);
-    const constant_opcode = @intFromEnum(zlox.chunk.OpCode.OpConstant);
-    try chk.write(constant_opcode, 123);
-    try chk.write(0, 123);
-
-    const return_opcode = @intFromEnum(zlox.chunk.OpCode.OpReturn);
-    try chk.write(return_opcode, 123);
-
-    chk.disassemble("test chunk");
+    if (!try zlox.compiler.compile("var x = 1;\n// this is a comment\nprint x;", &chunk)) {
+        std.debug.print("Compilation failed.\n", .{});
+        return;
+    }
 }
 
 test "simple test" {

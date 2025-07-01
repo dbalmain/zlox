@@ -1,3 +1,5 @@
 # Zig build artifacts
 .zig-cache/
 zig-out/
+
+GEMINI.md

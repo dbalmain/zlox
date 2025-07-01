@@ -3,6 +3,11 @@ const value = @import("value.zig");
 
 pub const OpCode = enum(u8) {
     OpConstant,
+    OpAdd,
+    OpSubtract,
+    OpMultiply,
+    OpDivide,
+    OpNegate,
     OpReturn,
 };
 
@@ -55,6 +60,21 @@ pub const Chunk = struct {
         switch (instruction) {
             .OpConstant => {
                 return constantInstruction("OP_CONSTANT", self, offset);
+            },
+            .OpAdd => {
+                return simpleInstruction("OP_ADD", offset);
+            },
+            .OpSubtract => {
+                return simpleInstruction("OP_SUBTRACT", offset);
+            },
+            .OpMultiply => {
+                return simpleInstruction("OP_MULTIPLY", offset);
+            },
+            .OpDivide => {
+                return simpleInstruction("OP_DIVIDE", offset);
+            },
+            .OpNegate => {
+                return simpleInstruction("OP_NEGATE", offset);
             },
             .OpReturn => {
                 return simpleInstruction("OP_RETURN", offset);
