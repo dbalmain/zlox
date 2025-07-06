@@ -1,17 +1,11 @@
 const std = @import("std");
-const zlox = @import("zlox");
+const zlox = @import("root.zig");
 
 pub fn main() !void {
     var vm = zlox.vm.VM.init();
     defer vm.deinit();
 
-    var chunk = zlox.chunk.Chunk.init(std.heap.page_allocator);
-    defer chunk.deinit();
-
-    if (!try zlox.compiler.compile("var x = 1;\n// this is a comment\nprint x;", &chunk)) {
-        std.debug.print("Compilation failed.\n", .{});
-        return;
-    }
+    _ = vm.interpret("-1.2 * (3.4 + 5.6)");
 }
 
 test "simple test" {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const chunk = @import("chunk.zig");
 const value = @import("value.zig");
+const compiler = @import("compiler.zig");
 
 pub const InterpretResult = enum {
     Ok,
@@ -27,8 +28,15 @@ pub const VM = struct {
 
     pub fn deinit(_: *VM) void {}
 
-    pub fn interpret(self: *VM, chk: *chunk.Chunk) !InterpretResult {
-        self.chk = chk;
+    pub fn interpret(self: *VM, source: []const u8) InterpretResult {
+        var chk = chunk.Chunk.init(std.heap.page_allocator);
+        defer chk.deinit();
+
+        if (!compiler.compile(source, &chk)) {
+            return .CompileError;
+        }
+
+        self.chk = &chk;
         self.ip = self.chk.code.items.ptr;
         self.resetStack();
         return self.run();
@@ -38,45 +46,78 @@ pub const VM = struct {
         self.stackTop = &self.stack;
     }
 
-    fn run(self: *VM) !InterpretResult {
+    fn runtimeError(self: *VM, comptime format: []const u8, args: anytype) InterpretResult {
+        std.debug.print(format, args);
+        std.debug.print("\n", .{});
+
+        const instruction = self.ip - self.chk.code.items.ptr - 1;
+        const line = self.chk.lines.items[instruction];
+        std.debug.print("[line {d}] in script\n", .{line});
+
+        self.resetStack();
+        return .RuntimeError;
+    }
+
+    fn run(self: *VM) InterpretResult {
         while (true) {
             const instruction = self.read_byte();
             switch (@as(chunk.OpCode, @enumFromInt(instruction))) {
                 .OpReturn => {
-                    const val = self.pop();
-                    std.debug.print("{any}\n", .{val});
+                    value.print(self.pop());
+                    std.debug.print("\n", .{});
                     return .Ok;
                 },
-                .OpAdd => try self.binaryOp(.Add),
-                .OpSubtract => try self.binaryOp(.Subtract),
-                .OpMultiply => try self.binaryOp(.Multiply),
-                .OpDivide => try self.binaryOp(.Divide),
+                .OpAdd => {
+                    if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
+                        return self.runtimeError("Operands must be numbers.", .{});
+                    }
+                    const b = value.as_number(self.pop());
+                    const a = value.as_number(self.pop());
+                    self.push(value.number_val(a + b));
+                },
+                .OpSubtract => {
+                    if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
+                        return self.runtimeError("Operands must be numbers.", .{});
+                    }
+                    const b = value.as_number(self.pop());
+                    const a = value.as_number(self.pop());
+                    self.push(value.number_val(a - b));
+                },
+                .OpMultiply => {
+                    if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
+                        return self.runtimeError("Operands must be numbers.", .{});
+                    }
+                    const b = value.as_number(self.pop());
+                    const a = value.as_number(self.pop());
+                    self.push(value.number_val(a * b));
+                },
+                .OpDivide => {
+                    if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
+                        return self.runtimeError("Operands must be numbers.", .{});
+                    }
+                    const b = value.as_number(self.pop());
+                    const a = value.as_number(self.pop());
+                    self.push(value.number_val(a / b));
+                },
+                .OpNil => self.push(value.NIL_VAL),
+                .OpTrue => self.push(value.TRUE_VAL),
+                .OpFalse => self.push(value.FALSE_VAL),
                 .OpNegate => {
-                    const val = self.pop();
-                    try self.push(-val);
+                    if (!value.is_number(self.peek(0))) {
+                        return self.runtimeError("Operand must be a number.", .{});
+                    }
+                    self.push(value.number_val(-value.as_number(self.pop())));
                 },
                 .OpConstant => {
                     const constant = self.read_byte();
                     const val = self.chk.constants.values.items[constant];
-                    try self.push(val);
+                    self.push(val);
                 },
             }
         }
     }
 
-    fn binaryOp(self: *VM, comptime op: enum { Add, Subtract, Multiply, Divide }) !void {
-        const b = self.pop();
-        const a = self.pop();
-        switch (op) {
-            .Add => try self.push(a + b),
-            .Subtract => try self.push(a - b),
-            .Multiply => try self.push(a * b),
-            .Divide => try self.push(a / b),
-        }
-    }
-
-
-    fn push(self: *VM, val: value.Value) !void {
+    fn push(self: *VM, val: value.Value) void {
         self.stackTop[0] = val;
         self.stackTop += 1;
     }
@@ -84,6 +125,10 @@ pub const VM = struct {
     fn pop(self: *VM) value.Value {
         self.stackTop -= 1;
         return self.stackTop[0];
+    }
+
+    fn peek(self: *VM, distance: usize) value.Value {
+        return self.stackTop[distance];
     }
 
     fn read_byte(self: *VM) u8 {
