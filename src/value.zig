@@ -17,12 +17,16 @@ pub fn is_number(value: Value) bool {
     return (@as(u64, @bitCast(value)) & QNAN) != QNAN;
 }
 
+pub fn valuesEqual(a: Value, b: Value) bool {
+    return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
+}
+
 pub fn is_nil(value: Value) bool {
-    return value == NIL_VAL;
+    return valuesEqual(value, NIL_VAL);
 }
 
 pub fn is_bool(value: Value) bool {
-    return (@as(u64, @bitCast(value)) & @as(u64, @bitCast(FALSE_VAL))) == @as(u64, @bitCast(FALSE_VAL));
+    return (@as(u64, @bitCast(value)) | 1) == @as(u64, @bitCast(TRUE_VAL));
 }
 
 pub fn as_number(value: Value) f64 {
@@ -30,7 +34,7 @@ pub fn as_number(value: Value) f64 {
 }
 
 pub fn as_bool(value: Value) bool {
-    return value == TRUE_VAL;
+    return valuesEqual(value, TRUE_VAL);
 }
 
 pub fn number_val(value: f64) Value {
@@ -74,7 +78,7 @@ test "value types" {
     try std.testing.expect(is_number(num));
     try std.testing.expect(!is_bool(num));
     try std.testing.expect(!is_nil(num));
-    try std.testing.expect(as_number(num) == 1.2);
+    try std.testing.expect(as_number(num) == 1.2); // This should fail
 
     const tr = bool_val(true);
     try std.testing.expect(is_bool(tr));
@@ -89,4 +93,5 @@ test "value types" {
     const n = NIL_VAL;
     try std.testing.expect(is_nil(n));
     try std.testing.expect(!is_number(n));
+    try std.testing.expect(!is_bool(n));
 }
