@@ -38,15 +38,15 @@ pub const VM = struct {
 
         self.chk = &chk;
         self.ip = self.chk.code.items.ptr;
-        self.resetStack();
+        self.reset_stack();
         return self.run();
     }
 
-    fn resetStack(self: *VM) void {
+    fn reset_stack(self: *VM) void {
         self.stackTop = &self.stack;
     }
 
-    fn runtimeError(self: *VM, comptime format: []const u8, args: anytype) InterpretResult {
+    fn runtime_error(self: *VM, comptime format: []const u8, args: anytype) InterpretResult {
         std.debug.print(format, args);
         std.debug.print("\n", .{});
 
@@ -54,7 +54,7 @@ pub const VM = struct {
         const line = self.chk.lines.items[instruction];
         std.debug.print("[line {d}] in script\n", .{line});
 
-        self.resetStack();
+        self.reset_stack();
         return .RuntimeError;
     }
 
@@ -67,44 +67,24 @@ pub const VM = struct {
                     std.debug.print("\n", .{});
                     return .Ok;
                 },
-                .OpAdd => {
-                    if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
-                        return self.runtimeError("Operands must be numbers.", .{});
-                    }
-                    const b = value.as_number(self.pop());
-                    const a = value.as_number(self.pop());
-                    self.push(value.number_val(a + b));
+                .OpEqual => {
+                    const b = self.pop();
+                    const a = self.pop();
+                    self.push(value.bool_val(value.values_equal(a, b)));
                 },
-                .OpSubtract => {
-                    if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
-                        return self.runtimeError("Operands must be numbers.", .{});
-                    }
-                    const b = value.as_number(self.pop());
-                    const a = value.as_number(self.pop());
-                    self.push(value.number_val(a - b));
-                },
-                .OpMultiply => {
-                    if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
-                        return self.runtimeError("Operands must be numbers.", .{});
-                    }
-                    const b = value.as_number(self.pop());
-                    const a = value.as_number(self.pop());
-                    self.push(value.number_val(a * b));
-                },
-                .OpDivide => {
-                    if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
-                        return self.runtimeError("Operands must be numbers.", .{});
-                    }
-                    const b = value.as_number(self.pop());
-                    const a = value.as_number(self.pop());
-                    self.push(value.number_val(a / b));
-                },
+                .OpGreater => if (self.binary_op(.Gt)) |err| return err,
+                .OpLess => if (self.binary_op(.Lt)) |err| return err,
+                .OpAdd => if (self.binary_op(.Add)) |err| return err,
+                .OpSubtract => if (self.binary_op(.Sub)) |err| return err,
+                .OpMultiply => if (self.binary_op(.Mul)) |err| return err,
+                .OpDivide => if (self.binary_op(.Div)) |err| return err,
                 .OpNil => self.push(value.NIL_VAL),
                 .OpTrue => self.push(value.TRUE_VAL),
                 .OpFalse => self.push(value.FALSE_VAL),
+                .OpNot => self.push(value.bool_val(is_falsey(self.pop()))),
                 .OpNegate => {
                     if (!value.is_number(self.peek(0))) {
-                        return self.runtimeError("Operand must be a number.", .{});
+                        return self.runtime_error("Operand must be a number.", .{});
                     }
                     self.push(value.number_val(-value.as_number(self.pop())));
                 },
@@ -115,6 +95,24 @@ pub const VM = struct {
                 },
             }
         }
+    }
+
+    inline fn binary_op(self: *VM, comptime op: enum { Add, Sub, Mul, Div, Gt, Lt }) ?InterpretResult {
+        if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
+            return self.runtime_error("Operands must be numbers.", .{});
+        }
+        const b = value.as_number(self.pop());
+        const a = value.as_number(self.pop());
+
+        switch (op) {
+            .Add => self.push(value.number_val(a + b)),
+            .Sub => self.push(value.number_val(a - b)),
+            .Mul => self.push(value.number_val(a * b)),
+            .Div => self.push(value.number_val(a / b)),
+            .Gt => self.push(value.bool_val(a > b)),
+            .Lt => self.push(value.bool_val(a < b)),
+        }
+        return null;
     }
 
     fn push(self: *VM, val: value.Value) void {
@@ -137,3 +135,7 @@ pub const VM = struct {
         return byte;
     }
 };
+
+fn is_falsey(val: value.Value) bool {
+    return value.is_nil(val) or (value.is_bool(val) and !value.as_bool(val));
+}

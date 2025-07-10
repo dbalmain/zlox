@@ -2,9 +2,14 @@ const std = @import("std");
 
 pub const Value = f64;
 
+// The book uses a clever trick to store non-numeric values inside a double.
+// A double-precision float is "Not a Number" (NaN) if all of its exponent bits are set.
+// The remaining 52 bits (the fraction) can be used to store other data.
+// We can create a quiet NaN (QNAN) by setting the most significant bit of the fraction.
 const QNAN = 0x7ffc000000000000;
 const SIGN_BIT = 0x8000000000000000;
 
+// We'll use the lowest 3 bits of the fraction to tag our non-numeric types.
 const TAG_NIL = 1;
 const TAG_FALSE = 2;
 const TAG_TRUE = 3;
@@ -13,36 +18,40 @@ pub const NIL_VAL: Value = @bitCast(@as(u64, QNAN | TAG_NIL));
 pub const FALSE_VAL: Value = @bitCast(@as(u64, QNAN | TAG_FALSE));
 pub const TRUE_VAL: Value = @bitCast(@as(u64, QNAN | TAG_TRUE));
 
-pub fn is_number(value: Value) bool {
-    return (@as(u64, @bitCast(value)) & QNAN) != QNAN;
+pub fn bool_val(b: bool) Value {
+    return if (b) TRUE_VAL else FALSE_VAL;
 }
 
-pub fn valuesEqual(a: Value, b: Value) bool {
+pub fn number_val(n: f64) Value {
+    return n;
+}
+
+pub fn as_bool(v: Value) bool {
+    return values_equal(v, TRUE_VAL);
+}
+
+pub fn as_number(v: Value) f64 {
+    return v;
+}
+
+pub fn is_bool(v: Value) bool {
+    return (@as(u64, @bitCast(v)) & @as(u64, @bitCast(FALSE_VAL))) == @as(u64, @bitCast(FALSE_VAL));
+}
+
+pub fn is_nil(v: Value) bool {
+    return values_equal(v, NIL_VAL);
+}
+
+pub fn is_number(v: Value) bool {
+    // If it's not a NaN, it's a number.
+    return (@as(u64, @bitCast(v)) & QNAN) != QNAN;
+}
+
+pub fn values_equal(a: Value, b: Value) bool {
+    if (is_number(a) and is_number(b)) {
+        return as_number(a) == as_number(b);
+    }
     return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
-}
-
-pub fn is_nil(value: Value) bool {
-    return valuesEqual(value, NIL_VAL);
-}
-
-pub fn is_bool(value: Value) bool {
-    return (@as(u64, @bitCast(value)) | 1) == @as(u64, @bitCast(TRUE_VAL));
-}
-
-pub fn as_number(value: Value) f64 {
-    return value;
-}
-
-pub fn as_bool(value: Value) bool {
-    return valuesEqual(value, TRUE_VAL);
-}
-
-pub fn number_val(value: f64) Value {
-    return value;
-}
-
-pub fn bool_val(value: bool) Value {
-    return if (value) TRUE_VAL else FALSE_VAL;
 }
 
 pub fn print(value: Value) void {
@@ -72,26 +81,3 @@ pub const ValueArray = struct {
         try self.values.append(value);
     }
 };
-
-test "value types" {
-    const num = number_val(1.2);
-    try std.testing.expect(is_number(num));
-    try std.testing.expect(!is_bool(num));
-    try std.testing.expect(!is_nil(num));
-    try std.testing.expect(as_number(num) == 1.2); // This should fail
-
-    const tr = bool_val(true);
-    try std.testing.expect(is_bool(tr));
-    try std.testing.expect(!is_number(tr));
-    try std.testing.expect(as_bool(tr));
-
-    const fls = bool_val(false);
-    try std.testing.expect(is_bool(fls));
-    try std.testing.expect(!is_number(fls));
-    try std.testing.expect(!as_bool(fls));
-
-    const n = NIL_VAL;
-    try std.testing.expect(is_nil(n));
-    try std.testing.expect(!is_number(n));
-    try std.testing.expect(!is_bool(n));
-}

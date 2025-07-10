@@ -2,16 +2,20 @@ const std = @import("std");
 const value = @import("value.zig");
 
 pub const OpCode = enum(u8) {
-    OpConstant,
-    OpNil,
-    OpTrue,
-    OpFalse,
-    OpAdd,
-    OpSubtract,
-    OpMultiply,
-    OpDivide,
-    OpNegate,
-    OpReturn,
+    Constant,
+    Nil,
+    True,
+    False,
+    Equal,
+    Greater,
+    Less,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Not,
+    Negate,
+    Return,
 };
 
 pub const Chunk = struct {
@@ -73,6 +77,15 @@ pub const Chunk = struct {
             .OpFalse => {
                 return simpleInstruction("OP_FALSE", offset);
             },
+            .OpEqual => {
+                return simpleInstruction("OP_EQUAL", offset);
+            },
+            .OpGreater => {
+                return simpleInstruction("OP_GREATER", offset);
+            },
+            .OpLess => {
+                return simpleInstruction("OP_LESS", offset);
+            },
             .OpAdd => {
                 return simpleInstruction("OP_ADD", offset);
             },
@@ -85,12 +98,15 @@ pub const Chunk = struct {
             .OpDivide => {
                 return simpleInstruction("OP_DIVIDE", offset);
             },
+            .OpNot => {
+                return simpleInstruction("OP_NOT", offset);
+            },
             .OpNegate => {
                 return simpleInstruction("OP_NEGATE", offset);
             },
             .OpReturn => {
                 return simpleInstruction("OP_RETURN", offset);
-            }
+            },
         }
     }
 };
@@ -120,7 +136,7 @@ test "write to chunk" {
     var chunk = Chunk.init(allocator);
     defer chunk.deinit();
 
-    const return_opcode = @intFromEnum(OpCode.OpReturn);
+    const return_opcode = @intFromEnum(OpCode.Return);
     try chunk.write(return_opcode, 123);
     try std.testing.expect(chunk.code.items.len == 1);
     try std.testing.expect(chunk.code.items[0] == return_opcode);
