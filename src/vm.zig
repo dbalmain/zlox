@@ -202,13 +202,14 @@ test "string concatenation" {
         std.debug.print("Unexpected interpret error: {any}", .{err});
         return err;
     };
-    const maybe_result_value = vm.globals.map.get("result");
-    try std.testing.expect(maybe_result_value != null);
-    if (maybe_result_value) |result_value| {
-        try std.testing.expect(value.is_string(result_value));
-        const string_obj = value.as_object(result_value);
-        try std.testing.expectEqualSlices(u8, "hello world", object.as_string_bytes(string_obj));
-    }
+    const result_value = vm.globals.map.get("result") orelse {
+        std.debug.print("FAIL: The global variable 'result' was not found.\n", .{});
+        return error.TestUnexpectedResult;
+    };
+
+    try std.testing.expect(value.is_string(result_value));
+    const string_obj = value.as_object(result_value);
+    try std.testing.expectEqualSlices(u8, "hello world", object.as_string_bytes(string_obj));
 }
 
 test "global variables" {
@@ -224,10 +225,11 @@ test "global variables" {
         std.debug.print("Unexpected interpret error: {any}", .{err});
         return err;
     };
-    const maybe_result_value = vm.globals.map.get("result");
-    try std.testing.expect(maybe_result_value != null);
-    if (maybe_result_value) |result_value| {
-        try std.testing.expect(value.is_number(result_value));
-        try std.testing.expectEqual(3.0, value.as_number(result_value));
-    }
+    const result_value = vm.globals.map.get("result") orelse {
+        std.debug.print("FAIL: The global variable 'result' was not found.\n", .{});
+        return error.TestUnexpectedResult;
+    };
+
+    try std.testing.expect(value.is_number(result_value));
+    try std.testing.expectEqual(3.0, value.as_number(result_value));
 }
