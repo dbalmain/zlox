@@ -3,6 +3,7 @@ const scanner = @import("scanner.zig");
 const chunk = @import("chunk.zig");
 const value = @import("value.zig");
 const object = @import("object.zig");
+const table = @import("table.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -94,13 +95,15 @@ const Compiler = struct {
     parser: Parser,
     scanner: scanner.Scanner,
     compilingChunk: *chunk.Chunk,
+    strings: *table.Table,
 
-    pub fn init(allocator: Allocator, source: []const u8, chk: *chunk.Chunk) Compiler {
+    pub fn init(allocator: Allocator, source: []const u8, chk: *chunk.Chunk, strings: *table.Table) Compiler {
         return .{
             .allocator = allocator,
             .parser = Parser.init(),
             .scanner = scanner.Scanner.init(source),
             .compilingChunk = chk,
+            .strings = strings,
         };
     }
 
@@ -226,7 +229,7 @@ fn literal(comptime op_code: chunk.OpCode) ParseFn {
 fn string(c: *Compiler) !void {
     // The +1 and -2 trim the leading and trailing quotation marks.
     const string_literal = c.parser.previous.start[1 .. c.parser.previous.length - 1];
-    const obj = try object.copy_string(c.allocator, string_literal, &c.compilingChunk.objects);
+    const obj = try object.copy_string(c.allocator, string_literal, &c.compilingChunk.objects, c.strings);
     try c.emit_constant(value.object_val(&obj.obj));
 }
 
@@ -264,8 +267,8 @@ fn binary(c: *Compiler) !void {
     }
 }
 
-pub fn compile(allocator: Allocator, source: []const u8, chk: *chunk.Chunk) bool {
-    var c = Compiler.init(allocator, source, chk);
+pub fn compile(allocator: Allocator, source: []const u8, chk: *chunk.Chunk, strings: *table.Table) bool {
+    var c = Compiler.init(allocator, source, chk, strings);
     c.advance();
     c.expression() catch |err| {
         std.debug.print("Unhandled compile error: {any}\n", .{err});
@@ -282,7 +285,9 @@ test "compile true" {
     defer chk.deinit();
 
     const source = "true";
-    const result = compile(allocator, source, &chk);
+    var strings = table.Table.init(allocator);
+    defer strings.deinit();
+    const result = compile(allocator, source, &chk, &strings);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.True)), chk.code.items[0]);
@@ -295,7 +300,9 @@ test "compile false" {
     defer chk.deinit();
 
     const source = "false";
-    const result = compile(allocator, source, &chk);
+    var strings = table.Table.init(allocator);
+    defer strings.deinit();
+    const result = compile(allocator, source, &chk, &strings);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.False)), chk.code.items[0]);
@@ -308,7 +315,9 @@ test "compile nil" {
     defer chk.deinit();
 
     const source = "nil";
-    const result = compile(allocator, source, &chk);
+    var strings = table.Table.init(allocator);
+    defer strings.deinit();
+    const result = compile(allocator, source, &chk, &strings);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Nil)), chk.code.items[0]);
@@ -321,7 +330,9 @@ test "compile string" {
     defer chk.deinit();
 
     const source = "\"hello\" + \"world\"";
-    const result = compile(allocator, source, &chk);
+    var strings = table.Table.init(allocator);
+    defer strings.deinit();
+    const result = compile(allocator, source, &chk, &strings);
 
     {
         try std.testing.expect(result);

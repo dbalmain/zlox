@@ -3,6 +3,7 @@ const chunk = @import("chunk.zig");
 const value = @import("value.zig");
 const compiler = @import("compiler.zig");
 const object = @import("object.zig");
+const table = @import("table.zig");
 
 pub const InterpretError = error{
     CompileError,
@@ -18,6 +19,7 @@ pub const VM = struct {
     stack: [STACK_MAX]value.Value,
     stackTop: [*]value.Value,
     objects: ?*object.Obj = null,
+    strings: table.Table,
 
     pub fn init(allocator: std.mem.Allocator) VM {
         return VM{
@@ -26,15 +28,17 @@ pub const VM = struct {
             .ip = undefined,
             .stack = undefined,
             .stackTop = undefined,
+            .strings = table.Table.init(allocator),
         };
     }
 
     pub fn deinit(self: *VM) void {
         object.free_objects(self.allocator, &self.objects);
+        self.strings.deinit();
     }
 
     pub fn interpret(self: *VM, source: []const u8, chk: *chunk.Chunk) InterpretError!value.Value {
-        if (!compiler.compile(self.allocator, source, chk)) {
+        if (!compiler.compile(self.allocator, source, chk, &self.strings)) {
             return InterpretError.CompileError;
         }
 
@@ -81,7 +85,7 @@ pub const VM = struct {
                     if (value.is_string(self.peek(0)) and value.is_string(self.peek(1))) {
                         const b = value.as_object(self.pop());
                         const a = value.as_object(self.pop());
-                        const result = value.concatenate(self.allocator, object.as_string(a), object.as_string(b), &self.objects) catch {
+                        const result = value.concatenate(self.allocator, object.as_string(a), object.as_string(b), &self.objects, &self.strings) catch {
                             return self.runtime_error("Could not allocate memory for string concatenation.", .{});
                         };
                         self.push(value.object_val(&result.obj));

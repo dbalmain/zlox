@@ -1,5 +1,6 @@
 const std = @import("std");
 const value = @import("value.zig");
+const table = @import("table.zig");
 
 pub const ObjType = enum {
     String,
@@ -48,18 +49,30 @@ fn hash_string(bytes: []const u8) u32 {
 }
 
 // Creates a new ObjString on the heap, copying the provided characters.
-pub fn copy_string(allocator: std.mem.Allocator, bytes: []const u8, head: *?*Obj) !*ObjString {
-    // Note: String interning will be added here later.
+pub fn copy_string(allocator: std.mem.Allocator, bytes: []const u8, head: *?*Obj, strings: *table.Table) !*ObjString {
+    const interned = strings.map.get(bytes);
+    if (interned) |interned_str| {
+        return interned_str;
+    }
+
     const heap_chars = try allocator.alloc(u8, bytes.len);
     @memcpy(heap_chars, bytes);
-    return take_string(allocator, heap_chars, bytes.len, head);
+    return take_string(allocator, heap_chars, bytes.len, head, strings);
 }
 
-pub fn take_string(allocator: std.mem.Allocator, chars: []u8, length: usize, head: *?*Obj) !*ObjString {
+pub fn take_string(allocator: std.mem.Allocator, chars: []u8, length: usize, head: *?*Obj, strings: *table.Table) !*ObjString {
+    const hash = hash_string(chars[0..length]);
+    const interned = strings.map.get(chars[0..length]);
+    if (interned) |interned_str| {
+        allocator.free(chars);
+        return interned_str;
+    }
+
     var ptr = try allocate_object(allocator, ObjString, .String, head);
     ptr.length = length;
     ptr.chars = chars;
-    ptr.hash = hash_string(chars[0..length]);
+    ptr.hash = hash;
+    try strings.map.put(chars, ptr);
     return ptr;
 }
 

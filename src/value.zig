@@ -1,7 +1,8 @@
 const std = @import("std");
 const object = @import("object.zig");
+const table = @import("table.zig");
 
-pub const Value = f64;
+pub const Value = u64;
 
 // The book uses a clever trick to store non-numeric values inside a double.
 // A double-precision float is "Not a Number" (NaN) if all of its exponent bits are set.
@@ -15,49 +16,49 @@ const TAG_NIL = 1;
 const TAG_FALSE = 2;
 const TAG_TRUE = 3;
 
-pub const NIL_VAL: Value = @bitCast(@as(u64, QNAN | TAG_NIL));
-pub const FALSE_VAL: Value = @bitCast(@as(u64, QNAN | TAG_FALSE));
-pub const TRUE_VAL: Value = @bitCast(@as(u64, QNAN | TAG_TRUE));
+pub const NIL_VAL: Value = QNAN | TAG_NIL;
+pub const FALSE_VAL: Value = QNAN | TAG_FALSE;
+pub const TRUE_VAL: Value = QNAN | TAG_TRUE;
 
 pub fn bool_val(b: bool) Value {
     return if (b) TRUE_VAL else FALSE_VAL;
 }
 
 pub fn number_val(n: f64) Value {
-    return n;
+    return @bitCast(n);
 }
 
 pub fn object_val(obj: *object.Obj) Value {
-    return @bitCast(SIGN_BIT | QNAN | @intFromPtr(obj));
+    return SIGN_BIT | QNAN | @intFromPtr(obj);
 }
 
 pub fn as_bool(v: Value) bool {
-    return values_equal(v, TRUE_VAL);
+    return v == TRUE_VAL;
 }
 
 pub fn as_number(v: Value) f64 {
-    return v;
+    return @bitCast(v);
 }
 
 pub fn as_object(v: Value) *object.Obj {
-    return @ptrFromInt(@as(u64, @bitCast(v)) & ~@as(u64, SIGN_BIT | QNAN));
+    return @ptrFromInt(v & ~(@as(u64, SIGN_BIT | QNAN)));
 }
 
 pub fn is_bool(v: Value) bool {
-    return (@as(u64, @bitCast(v)) & @as(u64, @bitCast(FALSE_VAL))) == @as(u64, @bitCast(FALSE_VAL));
+    return (v | 1) == TRUE_VAL;
 }
 
 pub fn is_nil(v: Value) bool {
-    return values_equal(v, NIL_VAL);
+    return v == NIL_VAL;
 }
 
 pub fn is_number(v: Value) bool {
     // If it's not a NaN, it's a number.
-    return (@as(u64, @bitCast(v)) & QNAN) != QNAN;
+    return (v & QNAN) != QNAN;
 }
 
 pub fn is_object(v: Value) bool {
-    return (@as(u64, @bitCast(v)) & (QNAN | SIGN_BIT)) == (QNAN | SIGN_BIT);
+    return (v & (QNAN | SIGN_BIT)) == (QNAN | SIGN_BIT);
 }
 
 pub fn is_string(v: Value) bool {
@@ -75,9 +76,11 @@ pub fn values_equal(a: Value, b: Value) bool {
             switch (obj_a.type) {
                 .String => return std.mem.eql(u8, object.as_string_bytes(obj_a), object.as_string_bytes(obj_b)),
             }
+        } else {
+            return false;
         }
     }
-    return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
+    return a == b;
 }
 
 pub fn print(value: Value) void {
@@ -98,12 +101,12 @@ pub fn print_object(v: Value) void {
     }
 }
 
-pub fn concatenate(allocator: std.mem.Allocator, a: *object.ObjString, b: *object.ObjString, head: *?*object.Obj) !*object.ObjString {
+pub fn concatenate(allocator: std.mem.Allocator, a: *object.ObjString, b: *object.ObjString, head: *?*object.Obj, strings: *table.Table) !*object.ObjString {
     const length = a.length + b.length;
     const chars = try allocator.alloc(u8, length);
     @memcpy(chars[0..a.length], a.chars);
     @memcpy(chars[a.length..length], b.chars);
-    return object.take_string(allocator, chars, length, head);
+    return object.take_string(allocator, chars, length, head, strings);
 }
 
 pub const ValueArray = struct {
@@ -149,8 +152,10 @@ test "object_val, is_object, as_object, is_string" {
     const allocator = std.testing.allocator;
     var objects: ?*object.Obj = null;
     defer object.free_objects(allocator, &objects);
+    var strings = table.Table.init(allocator);
+    defer strings.deinit();
 
-    const test_string = try object.copy_string(allocator, "test", &objects);
+    const test_string = try object.copy_string(allocator, "test", &objects, &strings);
     const obj_val = object_val(&test_string.obj);
 
     try std.testing.expect(is_object(obj_val));
@@ -162,8 +167,10 @@ test "is_number with object" {
     const allocator = std.testing.allocator;
     var objects: ?*object.Obj = null;
     defer object.free_objects(allocator, &objects);
+    var strings = table.Table.init(allocator);
+    defer strings.deinit();
 
-    const test_string = try object.copy_string(allocator, "test", &objects);
+    const test_string = try object.copy_string(allocator, "test", &objects, &strings);
     const obj_val = object_val(&test_string.obj);
 
     try std.testing.expect(!is_number(obj_val));
@@ -186,10 +193,12 @@ test "values_equal" {
     const allocator = std.testing.allocator;
     var objects: ?*object.Obj = null;
     defer object.free_objects(allocator, &objects);
+    var strings = table.Table.init(allocator);
+    defer strings.deinit();
 
-    const str1 = try object.copy_string(allocator, "hello", &objects);
-    const str2 = try object.copy_string(allocator, "hello", &objects);
-    const str3 = try object.copy_string(allocator, "world", &objects);
+    const str1 = try object.copy_string(allocator, "hello", &objects, &strings);
+    const str2 = try object.copy_string(allocator, "hello", &objects, &strings);
+    const str3 = try object.copy_string(allocator, "world", &objects, &strings);
 
     try std.testing.expect(values_equal(object_val(&str1.obj), object_val(&str2.obj)));
     try std.testing.expect(!values_equal(object_val(&str1.obj), object_val(&str3.obj)));
@@ -199,10 +208,12 @@ test "concatenate" {
     const allocator = std.testing.allocator;
     var objects: ?*object.Obj = null;
     defer object.free_objects(allocator, &objects);
+    var strings = table.Table.init(allocator);
+    defer strings.deinit();
 
-    const str1 = try object.copy_string(allocator, "hello", &objects);
-    const str2 = try object.copy_string(allocator, " world", &objects);
+    const str1 = try object.copy_string(allocator, "hello", &objects, &strings);
+    const str2 = try object.copy_string(allocator, " world", &objects, &strings);
 
-    const concatenated_str = try concatenate(allocator, str1, str2, &objects);
+    const concatenated_str = try concatenate(allocator, str1, str2, &objects, &strings);
     try std.testing.expectEqualSlices(u8, "hello world", concatenated_str.chars[0..concatenated_str.length]);
 }
