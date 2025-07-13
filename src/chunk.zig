@@ -16,7 +16,12 @@ pub const OpCode = enum(u8) {
     Divide,
     Not,
     Negate,
+    Print,
     Return,
+    DefineGlobal,
+    GetGlobal,
+    SetGlobal,
+    Pop,
 };
 
 pub const Chunk = struct {
@@ -107,8 +112,23 @@ pub const Chunk = struct {
             .Negate => {
                 return simpleInstruction("OP_NEGATE", offset);
             },
+            .Print => {
+                return simpleInstruction("OP_PRINT", offset);
+            },
             .Return => {
                 return simpleInstruction("OP_RETURN", offset);
+            },
+            .DefineGlobal => {
+                return constantInstruction("OP_DEFINE_GLOBAL", self, offset);
+            },
+            .GetGlobal => {
+                return constantInstruction("OP_GET_GLOBAL", self, offset);
+            },
+            .SetGlobal => {
+                return constantInstruction("OP_SET_GLOBAL", self, offset);
+            },
+            .Pop => {
+                return simpleInstruction("OP_POP", offset);
             },
         }
     }

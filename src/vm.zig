@@ -19,7 +19,8 @@ pub const VM = struct {
     stack: [STACK_MAX]value.Value,
     stackTop: [*]value.Value,
     objects: ?*object.Obj = null,
-    strings: table.Table,
+    strings: table.Table(*object.ObjString),
+    globals: table.Table(value.Value),
 
     pub fn init(allocator: std.mem.Allocator) VM {
         return VM{
@@ -28,16 +29,18 @@ pub const VM = struct {
             .ip = undefined,
             .stack = undefined,
             .stackTop = undefined,
-            .strings = table.Table.init(allocator),
+            .strings = table.Table(*object.ObjString).init(allocator),
+            .globals = table.Table(value.Value).init(allocator),
         };
     }
 
     pub fn deinit(self: *VM) void {
         object.free_objects(self.allocator, &self.objects);
         self.strings.deinit();
+        self.globals.deinit();
     }
 
-    pub fn interpret(self: *VM, source: []const u8, chk: *chunk.Chunk) InterpretError!value.Value {
+    pub fn interpret(self: *VM, source: []const u8, chk: *chunk.Chunk) InterpretError!void {
         if (!compiler.compile(self.allocator, source, chk, &self.strings)) {
             return InterpretError.CompileError;
         }
@@ -47,8 +50,6 @@ pub const VM = struct {
         self.reset_stack();
 
         try self.run();
-
-        return self.pop();
     }
 
     fn reset_stack(self: *VM) void {
@@ -73,6 +74,10 @@ pub const VM = struct {
             switch (@as(chunk.OpCode, @enumFromInt(instruction))) {
                 .Return => {
                     return;
+                },
+                .Print => {
+                    value.print(self.pop());
+                    std.debug.print("\n", .{});
                 },
                 .Equal => {
                     const b = self.pop();
@@ -111,6 +116,33 @@ pub const VM = struct {
                     const val = self.chk.constants.values.items[constant];
                     self.push(val);
                 },
+                .DefineGlobal => {
+                    const constant = self.read_byte();
+                    const name = object.as_string(value.as_object(self.chk.constants.values.items[constant]));
+                    self.globals.map.put(name.chars, self.peek(0)) catch return self.runtime_error("Out of memory.", .{});
+                    _ = self.pop();
+                },
+                .GetGlobal => {
+                    const constant = self.read_byte();
+                    const name = object.as_string(value.as_object(self.chk.constants.values.items[constant]));
+                    const val = self.globals.map.get(name.chars) orelse {
+                        return self.runtime_error("Undefined variable '{s}'.", .{name.chars});
+                    };
+                    self.push(val);
+                },
+                .SetGlobal => {
+                    const constant = self.read_byte();
+                    const name = object.as_string(value.as_object(self.chk.constants.values.items[constant]));
+                    const previous = self.globals.map.fetchPut(name.chars, self.peek(0)) catch return self.runtime_error("Out of memory", .{});
+
+                    if (previous == null) {
+                        _ = self.globals.map.remove(name.chars);
+                        return self.runtime_error("Undefined variable '{s}'.", .{name.chars});
+                    }
+                },
+                .Pop => {
+                    _ = self.pop();
+                },
             }
         }
     }
@@ -121,8 +153,6 @@ pub const VM = struct {
         }
         const b = value.as_number(self.pop());
         const a = value.as_number(self.pop());
-
-        std.debug.print("Got here {}, {}!", .{ a, b });
 
         switch (op) {
             .Add => self.push(value.number_val(a + b)),
@@ -164,16 +194,40 @@ test "string concatenation" {
     var vm = VM.init(allocator);
     defer vm.deinit();
 
-    const source = "\"hello\" + \" world\"";
+    const source = "var result = \"hello\" + \" world\";";
     var chk = chunk.Chunk.init(allocator);
     defer chk.deinit();
 
-    const result_value = vm.interpret(source, &chk) catch |err| {
+    vm.interpret(source, &chk) catch |err| {
         std.debug.print("Unexpected interpret error: {any}", .{err});
         return err;
     };
+    const maybe_result_value = vm.globals.map.get("result");
+    try std.testing.expect(maybe_result_value != null);
+    if (maybe_result_value) |result_value| {
+        try std.testing.expect(value.is_string(result_value));
+        const string_obj = value.as_object(result_value);
+        try std.testing.expectEqualSlices(u8, "hello world", object.as_string_bytes(string_obj));
+    }
+}
 
-    try std.testing.expect(value.is_string(result_value));
-    const string_obj = value.as_object(result_value);
-    try std.testing.expectEqualSlices(u8, "hello world", object.as_string_bytes(string_obj));
+test "global variables" {
+    const allocator = std.testing.allocator;
+    var vm = VM.init(allocator);
+    defer vm.deinit();
+
+    const source = "var a = 1; var b = 2; var result = a + b;";
+    var chk = chunk.Chunk.init(allocator);
+    defer chk.deinit();
+
+    vm.interpret(source, &chk) catch |err| {
+        std.debug.print("Unexpected interpret error: {any}", .{err});
+        return err;
+    };
+    const maybe_result_value = vm.globals.map.get("result");
+    try std.testing.expect(maybe_result_value != null);
+    if (maybe_result_value) |result_value| {
+        try std.testing.expect(value.is_number(result_value));
+        try std.testing.expectEqual(3.0, value.as_number(result_value));
+    }
 }

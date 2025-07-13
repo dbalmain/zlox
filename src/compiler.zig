@@ -21,7 +21,7 @@ const Precedence = enum(u8) {
     Primary,
 };
 
-const ParseFn = *const fn (o: *Compiler) anyerror!void;
+const ParseFn = *const fn (o: *Compiler, can_assign: bool) anyerror!void;
 
 const ParseRule = struct {
     prefix: ?ParseFn,
@@ -50,23 +50,23 @@ fn get_rule(token_type: scanner.TokenType) ParseRule {
         .GreaterEqual => .{ .prefix = null, .infix = binary, .precedence = .Comparison },
         .Less => .{ .prefix = null, .infix = binary, .precedence = .Comparison },
         .LessEqual => .{ .prefix = null, .infix = binary, .precedence = .Comparison },
-        .Identifier => .{ .prefix = null, .infix = null, .precedence = .None },
+        .Identifier => .{ .prefix = variable, .infix = null, .precedence = .None },
         .String => .{ .prefix = string, .infix = null, .precedence = .None },
         .Number => .{ .prefix = number, .infix = null, .precedence = .None },
         .And => .{ .prefix = null, .infix = null, .precedence = .None },
         .Class => .{ .prefix = null, .infix = null, .precedence = .None },
         .Else => .{ .prefix = null, .infix = null, .precedence = .None },
-        .False => .{ .prefix = literal(chunk.OpCode.False), .infix = null, .precedence = .None },
+        .False => .{ .prefix = literal, .infix = null, .precedence = .None },
         .For => .{ .prefix = null, .infix = null, .precedence = .None },
         .Fun => .{ .prefix = null, .infix = null, .precedence = .None },
         .If => .{ .prefix = null, .infix = null, .precedence = .None },
-        .Nil => .{ .prefix = literal(chunk.OpCode.Nil), .infix = null, .precedence = .None },
+        .Nil => .{ .prefix = literal, .infix = null, .precedence = .None },
         .Or => .{ .prefix = null, .infix = null, .precedence = .None },
         .Print => .{ .prefix = null, .infix = null, .precedence = .None },
         .Return => .{ .prefix = null, .infix = null, .precedence = .None },
         .Super => .{ .prefix = null, .infix = null, .precedence = .None },
         .This => .{ .prefix = null, .infix = null, .precedence = .None },
-        .True => .{ .prefix = literal(chunk.OpCode.True), .infix = null, .precedence = .None },
+        .True => .{ .prefix = literal, .infix = null, .precedence = .None },
         .Var => .{ .prefix = null, .infix = null, .precedence = .None },
         .While => .{ .prefix = null, .infix = null, .precedence = .None },
         .Error => .{ .prefix = null, .infix = null, .precedence = .None },
@@ -95,9 +95,9 @@ const Compiler = struct {
     parser: Parser,
     scanner: scanner.Scanner,
     compilingChunk: *chunk.Chunk,
-    strings: *table.Table,
+    strings: *table.Table(*object.ObjString),
 
-    pub fn init(allocator: Allocator, source: []const u8, chk: *chunk.Chunk, strings: *table.Table) Compiler {
+    pub fn init(allocator: Allocator, source: []const u8, chk: *chunk.Chunk, strings: *table.Table(*object.ObjString)) Compiler {
         return .{
             .allocator = allocator,
             .parser = Parser.init(),
@@ -168,17 +168,83 @@ const Compiler = struct {
             return;
         }
 
-        try prefixRule.?(self);
+        const can_assign = @intFromEnum(precedence) <= @intFromEnum(Precedence.Assignment);
+        try prefixRule.?(self, can_assign);
 
         while (@intFromEnum(precedence) <= @intFromEnum(get_rule(self.parser.current.type).precedence)) {
             self.advance();
             const infixRule = get_rule(self.parser.previous.type).infix.?;
-            try infixRule(self);
+            try infixRule(self, can_assign);
         }
     }
 
     fn expression(self: *Compiler) !void {
         try self.parse_precedence(.Assignment);
+    }
+
+    fn declaration(self: *Compiler) !void {
+        if (self.match(.Var)) {
+            try self.var_declaration();
+        } else {
+            try self.statement();
+        }
+    }
+
+    fn var_declaration(self: *Compiler) !void {
+        const global = try self.parse_variable("Expect variable name.");
+
+        if (self.match(.Equal)) {
+            try self.expression();
+        } else {
+            self.emit_byte(@intFromEnum(chunk.OpCode.Nil));
+        }
+        self.consume(.Semicolon, "Expect ';' after variable declaration.");
+
+        self.define_variable(global);
+    }
+
+    fn define_variable(self: *Compiler, global: u8) void {
+        self.emit_bytes(@intFromEnum(chunk.OpCode.DefineGlobal), global);
+    }
+
+    fn parse_variable(self: *Compiler, error_message: []const u8) !u8 {
+        self.consume(.Identifier, error_message);
+        return self.identifier_constant(&self.parser.previous);
+    }
+
+    fn identifier_constant(self: *Compiler, name: *const scanner.Token) !u8 {
+        const obj = try object.copy_string(self.allocator, name.start[0..name.length], &self.compilingChunk.objects, self.strings);
+        return self.make_constant(value.object_val(&obj.obj));
+    }
+
+    fn statement(self: *Compiler) !void {
+        if (self.match(.Print)) {
+            try self.print_statement();
+        } else {
+            try self.expression_statement();
+        }
+    }
+
+    fn print_statement(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.Semicolon, "Expect ';' after value.");
+        self.emit_byte(@intFromEnum(chunk.OpCode.Print));
+    }
+
+    fn expression_statement(self: *Compiler) !void {
+        try self.expression();
+        self.consume(.Semicolon, "Expect ';' after expression.");
+        self.emit_byte(@intFromEnum(chunk.OpCode.Pop));
+    }
+
+    fn match(self: *Compiler, token_type: scanner.TokenType) bool {
+        if (!self.check(token_type)) return false;
+        self.advance();
+        return true;
+    }
+
+    fn check(self: *Compiler, token_type: scanner.TokenType) bool {
+        return self.parser.current.type == token_type;
     }
 
     fn error_at_current(self: *Compiler, message: []const u8) void {
@@ -206,34 +272,63 @@ const Compiler = struct {
         std.debug.print(": {s}\n", .{message});
         self.parser.hadError = true;
     }
+
+    fn synchronize(self: *Compiler) void {
+        self.parser.panicMode = false;
+
+        while (self.parser.current.type != .Eof) {
+            if (self.parser.previous.type == .Semicolon) return;
+            switch (self.parser.current.type) {
+                .Class, .Fun, .Var, .For, .If, .While, .Print, .Return => return,
+                else => {},
+            }
+
+            self.advance();
+        }
+    }
 };
 
-fn grouping(c: *Compiler) !void {
+fn grouping(c: *Compiler, _: bool) !void {
     try c.expression();
     c.consume(.RightParen, "Expect ')' after expression.");
 }
 
-fn number(c: *Compiler) !void {
+fn number(c: *Compiler, _: bool) !void {
     const val = std.fmt.parseFloat(f64, c.parser.previous.start[0..c.parser.previous.length]) catch unreachable;
     try c.emit_constant(value.number_val(val));
 }
 
-fn literal(comptime op_code: chunk.OpCode) ParseFn {
-    return struct {
-        fn emit_op_code(c: *Compiler) !void {
-            return c.emit_byte(@intFromEnum(op_code));
-        }
-    }.emit_op_code;
+fn literal(c: *Compiler, _: bool) !void {
+    switch (c.parser.previous.type) {
+        .False => c.emit_byte(@intFromEnum(chunk.OpCode.False)),
+        .Nil => c.emit_byte(@intFromEnum(chunk.OpCode.Nil)),
+        .True => c.emit_byte(@intFromEnum(chunk.OpCode.True)),
+        else => unreachable,
+    }
 }
 
-fn string(c: *Compiler) !void {
+fn string(c: *Compiler, _: bool) !void {
     // The +1 and -2 trim the leading and trailing quotation marks.
     const string_literal = c.parser.previous.start[1 .. c.parser.previous.length - 1];
     const obj = try object.copy_string(c.allocator, string_literal, &c.compilingChunk.objects, c.strings);
     try c.emit_constant(value.object_val(&obj.obj));
 }
 
-fn unary(c: *Compiler) !void {
+fn named_variable(c: *Compiler, name: scanner.Token, can_assign: bool) !void {
+    const arg = try c.identifier_constant(&name);
+    if (can_assign and c.match(.Equal)) {
+        try c.expression();
+        c.emit_bytes(@intFromEnum(chunk.OpCode.SetGlobal), arg);
+    } else {
+        c.emit_bytes(@intFromEnum(chunk.OpCode.GetGlobal), arg);
+    }
+}
+
+fn variable(c: *Compiler, can_assign: bool) !void {
+    try named_variable(c, c.parser.previous, can_assign);
+}
+
+fn unary(c: *Compiler, _: bool) !void {
     const operatorType = c.parser.previous.type;
 
     // Compile the operand.
@@ -247,7 +342,7 @@ fn unary(c: *Compiler) !void {
     }
 }
 
-fn binary(c: *Compiler) !void {
+fn binary(c: *Compiler, _: bool) !void {
     const operatorType = c.parser.previous.type;
     const rule = get_rule(operatorType);
     try c.parse_precedence(@as(Precedence, @enumFromInt(@intFromEnum(rule.precedence) + 1)));
@@ -267,14 +362,15 @@ fn binary(c: *Compiler) !void {
     }
 }
 
-pub fn compile(allocator: Allocator, source: []const u8, chk: *chunk.Chunk, strings: *table.Table) bool {
+pub fn compile(allocator: Allocator, source: []const u8, chk: *chunk.Chunk, strings: *table.Table(*object.ObjString)) bool {
     var c = Compiler.init(allocator, source, chk, strings);
     c.advance();
-    c.expression() catch |err| {
-        std.debug.print("Unhandled compile error: {any}\n", .{err});
-        return false;
-    };
-    c.consume(.Eof, "Expect end of expression.");
+    while (!c.match(.Eof)) {
+        c.declaration() catch |err| {
+            std.debug.print("Unhandled compile error: {any}\n", .{err});
+            c.synchronize();
+        };
+    }
     c.end();
     return !c.parser.hadError;
 }
@@ -284,14 +380,15 @@ test "compile true" {
     var chk = chunk.Chunk.init(allocator);
     defer chk.deinit();
 
-    const source = "true";
-    var strings = table.Table.init(allocator);
+    const source = "true;";
+    var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
     const result = compile(allocator, source, &chk, &strings);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.True)), chk.code.items[0]);
-    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[1]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Pop)), chk.code.items[1]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[2]);
 }
 
 test "compile false" {
@@ -299,14 +396,15 @@ test "compile false" {
     var chk = chunk.Chunk.init(allocator);
     defer chk.deinit();
 
-    const source = "false";
-    var strings = table.Table.init(allocator);
+    const source = "false;";
+    var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
     const result = compile(allocator, source, &chk, &strings);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.False)), chk.code.items[0]);
-    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[1]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Pop)), chk.code.items[1]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[2]);
 }
 
 test "compile nil" {
@@ -314,14 +412,15 @@ test "compile nil" {
     var chk = chunk.Chunk.init(allocator);
     defer chk.deinit();
 
-    const source = "nil";
-    var strings = table.Table.init(allocator);
+    const source = "nil;";
+    var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
     const result = compile(allocator, source, &chk, &strings);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Nil)), chk.code.items[0]);
-    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[1]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Pop)), chk.code.items[1]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[2]);
 }
 
 test "compile string" {
@@ -329,8 +428,8 @@ test "compile string" {
     var chk = chunk.Chunk.init(allocator);
     defer chk.deinit();
 
-    const source = "\"hello\" + \"world\"";
-    var strings = table.Table.init(allocator);
+    const source = "\"hello\" + \"world\";";
+    var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
     const result = compile(allocator, source, &chk, &strings);
 
@@ -354,5 +453,19 @@ test "compile string" {
     }
 
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Add)), chk.code.items[4]);
-    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[5]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Pop)), chk.code.items[5]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[6]);
+}
+
+test "compile print" {
+    const allocator = std.testing.allocator;
+    var chk = chunk.Chunk.init(allocator);
+    defer chk.deinit();
+
+    const source = "print 1 + 2;";
+    var strings = table.Table(*object.ObjString).init(allocator);
+    defer strings.deinit();
+    const result = compile(allocator, source, &chk, &strings);
+
+    try std.testing.expect(result);
 }

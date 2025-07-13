@@ -1,17 +1,17 @@
 const std = @import("std");
-const value = @import("value.zig");
-const object = @import("object.zig");
 
-pub const Table = struct {
-    map: std.StringHashMap(*object.ObjString),
+pub fn Table(comptime V: type) type {
+    return struct {
+        map: std.StringHashMap(V),
 
-    pub fn init(allocator: std.mem.Allocator) Table {
-        return .{
-            .map = std.StringHashMap(*object.ObjString).init(allocator),
-        };
-    }
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            return .{
+                .map = std.StringHashMap(V).init(allocator),
+            };
+        }
 
-    pub fn deinit(self: *Table) void {
-        self.map.deinit();
-    }
-};
+        pub fn deinit(self: *@This()) void {
+            self.map.deinit();
+        }
+    };
+}

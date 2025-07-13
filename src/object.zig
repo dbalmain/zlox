@@ -49,7 +49,7 @@ fn hash_string(bytes: []const u8) u32 {
 }
 
 // Creates a new ObjString on the heap, copying the provided characters.
-pub fn copy_string(allocator: std.mem.Allocator, bytes: []const u8, head: *?*Obj, strings: *table.Table) !*ObjString {
+pub fn copy_string(allocator: std.mem.Allocator, bytes: []const u8, head: *?*Obj, strings: *table.Table(*ObjString)) !*ObjString {
     const interned = strings.map.get(bytes);
     if (interned) |interned_str| {
         return interned_str;
@@ -60,7 +60,7 @@ pub fn copy_string(allocator: std.mem.Allocator, bytes: []const u8, head: *?*Obj
     return take_string(allocator, heap_chars, bytes.len, head, strings);
 }
 
-pub fn take_string(allocator: std.mem.Allocator, chars: []u8, length: usize, head: *?*Obj, strings: *table.Table) !*ObjString {
+pub fn take_string(allocator: std.mem.Allocator, chars: []u8, length: usize, head: *?*Obj, strings: *table.Table(*ObjString)) !*ObjString {
     const hash = hash_string(chars[0..length]);
     const interned = strings.map.get(chars[0..length]);
     if (interned) |interned_str| {

@@ -101,7 +101,7 @@ pub fn print_object(v: Value) void {
     }
 }
 
-pub fn concatenate(allocator: std.mem.Allocator, a: *object.ObjString, b: *object.ObjString, head: *?*object.Obj, strings: *table.Table) !*object.ObjString {
+pub fn concatenate(allocator: std.mem.Allocator, a: *object.ObjString, b: *object.ObjString, head: *?*object.Obj, strings: *table.Table(*object.ObjString)) !*object.ObjString {
     const length = a.length + b.length;
     const chars = try allocator.alloc(u8, length);
     @memcpy(chars[0..a.length], a.chars);
@@ -152,7 +152,7 @@ test "object_val, is_object, as_object, is_string" {
     const allocator = std.testing.allocator;
     var objects: ?*object.Obj = null;
     defer object.free_objects(allocator, &objects);
-    var strings = table.Table.init(allocator);
+    var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
 
     const test_string = try object.copy_string(allocator, "test", &objects, &strings);
@@ -167,7 +167,7 @@ test "is_number with object" {
     const allocator = std.testing.allocator;
     var objects: ?*object.Obj = null;
     defer object.free_objects(allocator, &objects);
-    var strings = table.Table.init(allocator);
+    var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
 
     const test_string = try object.copy_string(allocator, "test", &objects, &strings);
@@ -193,7 +193,7 @@ test "values_equal" {
     const allocator = std.testing.allocator;
     var objects: ?*object.Obj = null;
     defer object.free_objects(allocator, &objects);
-    var strings = table.Table.init(allocator);
+    var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
 
     const str1 = try object.copy_string(allocator, "hello", &objects, &strings);
@@ -208,7 +208,7 @@ test "concatenate" {
     const allocator = std.testing.allocator;
     var objects: ?*object.Obj = null;
     defer object.free_objects(allocator, &objects);
-    var strings = table.Table.init(allocator);
+    var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
 
     const str1 = try object.copy_string(allocator, "hello", &objects, &strings);

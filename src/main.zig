@@ -12,13 +12,10 @@ pub fn main() !void {
     var chk = zlox.chunk.Chunk.init(allocator);
     defer chk.deinit();
 
-    const result = vm.interpret("\"hello\" + \", \" + \"world\"", &chk) catch |err| {
+    vm.interpret("print \"hello\" + \", \" + \"world\";", &chk) catch |err| {
         std.debug.print("Interpret error: {any}\n", .{err});
         return;
     };
-
-    zlox.value.print(result);
-    std.debug.print("\n", .{});
 }
 
 test "simple test" {
