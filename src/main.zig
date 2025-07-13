@@ -2,10 +2,23 @@ const std = @import("std");
 const zlox = @import("root.zig");
 
 pub fn main() !void {
-    var vm = zlox.vm.VM.init();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer _ = gpa.deinit();
+
+    var vm = zlox.vm.VM.init(allocator);
     defer vm.deinit();
 
-    _ = vm.interpret("-1.2 * (3.4 + 5.6)");
+    var chk = zlox.chunk.Chunk.init(allocator);
+    defer chk.deinit();
+
+    const result = vm.interpret("\"hello\" + \", \" + \"world\"", &chk) catch |err| {
+        std.debug.print("Interpret error: {any}\n", .{err});
+        return;
+    };
+
+    zlox.value.print(result);
+    std.debug.print("\n", .{});
 }
 
 test "simple test" {

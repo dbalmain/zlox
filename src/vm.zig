@@ -2,9 +2,9 @@ const std = @import("std");
 const chunk = @import("chunk.zig");
 const value = @import("value.zig");
 const compiler = @import("compiler.zig");
+const object = @import("object.zig");
 
-pub const InterpretResult = enum {
-    Ok,
+pub const InterpretError = error{
     CompileError,
     RuntimeError,
 };
@@ -12,13 +12,16 @@ pub const InterpretResult = enum {
 const STACK_MAX = 256;
 
 pub const VM = struct {
+    allocator: std.mem.Allocator,
     chk: *chunk.Chunk,
     ip: [*]u8,
     stack: [STACK_MAX]value.Value,
     stackTop: [*]value.Value,
+    objects: ?*object.Obj = null,
 
-    pub fn init() VM {
+    pub fn init(allocator: std.mem.Allocator) VM {
         return VM{
+            .allocator = allocator,
             .chk = undefined,
             .ip = undefined,
             .stack = undefined,
@@ -26,27 +29,29 @@ pub const VM = struct {
         };
     }
 
-    pub fn deinit(_: *VM) void {}
+    pub fn deinit(self: *VM) void {
+        object.free_objects(self.allocator, &self.objects);
+    }
 
-    pub fn interpret(self: *VM, source: []const u8) InterpretResult {
-        var chk = chunk.Chunk.init(std.heap.page_allocator);
-        defer chk.deinit();
-
-        if (!compiler.compile(source, &chk)) {
-            return .CompileError;
+    pub fn interpret(self: *VM, source: []const u8, chk: *chunk.Chunk) InterpretError!value.Value {
+        if (!compiler.compile(self.allocator, source, chk)) {
+            return InterpretError.CompileError;
         }
 
-        self.chk = &chk;
+        self.chk = chk;
         self.ip = self.chk.code.items.ptr;
         self.reset_stack();
-        return self.run();
+
+        try self.run();
+
+        return self.pop();
     }
 
     fn reset_stack(self: *VM) void {
         self.stackTop = &self.stack;
     }
 
-    fn runtime_error(self: *VM, comptime format: []const u8, args: anytype) InterpretResult {
+    fn runtime_error(self: *VM, comptime format: []const u8, args: anytype) InterpretError!void {
         std.debug.print(format, args);
         std.debug.print("\n", .{});
 
@@ -55,40 +60,49 @@ pub const VM = struct {
         std.debug.print("[line {d}] in script\n", .{line});
 
         self.reset_stack();
-        return .RuntimeError;
+        return InterpretError.RuntimeError;
     }
 
-    fn run(self: *VM) InterpretResult {
+    fn run(self: *VM) InterpretError!void {
         while (true) {
             const instruction = self.read_byte();
             switch (@as(chunk.OpCode, @enumFromInt(instruction))) {
-                .OpReturn => {
-                    value.print(self.pop());
-                    std.debug.print("\n", .{});
-                    return .Ok;
+                .Return => {
+                    return;
                 },
-                .OpEqual => {
+                .Equal => {
                     const b = self.pop();
                     const a = self.pop();
                     self.push(value.bool_val(value.values_equal(a, b)));
                 },
-                .OpGreater => if (self.binary_op(.Gt)) |err| return err,
-                .OpLess => if (self.binary_op(.Lt)) |err| return err,
-                .OpAdd => if (self.binary_op(.Add)) |err| return err,
-                .OpSubtract => if (self.binary_op(.Sub)) |err| return err,
-                .OpMultiply => if (self.binary_op(.Mul)) |err| return err,
-                .OpDivide => if (self.binary_op(.Div)) |err| return err,
-                .OpNil => self.push(value.NIL_VAL),
-                .OpTrue => self.push(value.TRUE_VAL),
-                .OpFalse => self.push(value.FALSE_VAL),
-                .OpNot => self.push(value.bool_val(is_falsey(self.pop()))),
-                .OpNegate => {
+                .Greater => try self.binary_op(.Gt),
+                .Less => try self.binary_op(.Lt),
+                .Add => {
+                    if (value.is_string(self.peek(0)) and value.is_string(self.peek(1))) {
+                        const b = value.as_object(self.pop());
+                        const a = value.as_object(self.pop());
+                        const result = value.concatenate(self.allocator, object.as_string(a), object.as_string(b), &self.objects) catch {
+                            return self.runtime_error("Could not allocate memory for string concatenation.", .{});
+                        };
+                        self.push(value.object_val(&result.obj));
+                    } else {
+                        try self.binary_op(.Add);
+                    }
+                },
+                .Subtract => try self.binary_op(.Sub),
+                .Multiply => try self.binary_op(.Mul),
+                .Divide => try self.binary_op(.Div),
+                .Nil => self.push(value.NIL_VAL),
+                .True => self.push(value.TRUE_VAL),
+                .False => self.push(value.FALSE_VAL),
+                .Not => self.push(value.bool_val(is_falsey(self.pop()))),
+                .Negate => {
                     if (!value.is_number(self.peek(0))) {
                         return self.runtime_error("Operand must be a number.", .{});
                     }
                     self.push(value.number_val(-value.as_number(self.pop())));
                 },
-                .OpConstant => {
+                .Constant => {
                     const constant = self.read_byte();
                     const val = self.chk.constants.values.items[constant];
                     self.push(val);
@@ -97,12 +111,14 @@ pub const VM = struct {
         }
     }
 
-    inline fn binary_op(self: *VM, comptime op: enum { Add, Sub, Mul, Div, Gt, Lt }) ?InterpretResult {
+    inline fn binary_op(self: *VM, comptime op: enum { Add, Sub, Mul, Div, Gt, Lt }) InterpretError!void {
         if (!value.is_number(self.peek(0)) or !value.is_number(self.peek(1))) {
             return self.runtime_error("Operands must be numbers.", .{});
         }
         const b = value.as_number(self.pop());
         const a = value.as_number(self.pop());
+
+        std.debug.print("Got here {}, {}!", .{ a, b });
 
         switch (op) {
             .Add => self.push(value.number_val(a + b)),
@@ -112,7 +128,6 @@ pub const VM = struct {
             .Gt => self.push(value.bool_val(a > b)),
             .Lt => self.push(value.bool_val(a < b)),
         }
-        return null;
     }
 
     fn push(self: *VM, val: value.Value) void {
@@ -126,7 +141,7 @@ pub const VM = struct {
     }
 
     fn peek(self: *VM, distance: usize) value.Value {
-        return self.stackTop[distance];
+        return self.stack[self.stackTop - &self.stack - 1 - distance];
     }
 
     fn read_byte(self: *VM) u8 {
@@ -138,4 +153,23 @@ pub const VM = struct {
 
 fn is_falsey(val: value.Value) bool {
     return value.is_nil(val) or (value.is_bool(val) and !value.as_bool(val));
+}
+
+test "string concatenation" {
+    const allocator = std.testing.allocator;
+    var vm = VM.init(allocator);
+    defer vm.deinit();
+
+    const source = "\"hello\" + \" world\"";
+    var chk = chunk.Chunk.init(allocator);
+    defer chk.deinit();
+
+    const result_value = vm.interpret(source, &chk) catch |err| {
+        std.debug.print("Unexpected interpret error: {any}", .{err});
+        return err;
+    };
+
+    try std.testing.expect(value.is_string(result_value));
+    const string_obj = value.as_object(result_value);
+    try std.testing.expectEqualSlices(u8, "hello world", object.as_string_bytes(string_obj));
 }

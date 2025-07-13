@@ -1,5 +1,6 @@
 const std = @import("std");
 const value = @import("value.zig");
+const object = @import("object.zig");
 
 pub const OpCode = enum(u8) {
     Constant,
@@ -22,6 +23,7 @@ pub const Chunk = struct {
     code: std.ArrayList(u8),
     constants: value.ValueArray,
     lines: std.ArrayList(usize),
+    objects: ?*object.Obj = null,
 
     pub fn init(allocator: std.mem.Allocator) Chunk {
         return .{
@@ -35,6 +37,7 @@ pub const Chunk = struct {
         self.code.deinit();
         self.constants.deinit();
         self.lines.deinit();
+        object.free_objects(self.code.allocator, &self.objects);
     }
 
     pub fn write(self: *Chunk, byte: u8, line: usize) !void {
@@ -65,46 +68,46 @@ pub const Chunk = struct {
 
         const instruction: OpCode = @enumFromInt(self.code.items[offset]);
         switch (instruction) {
-            .OpConstant => {
+            .Constant => {
                 return constantInstruction("OP_CONSTANT", self, offset);
             },
-            .OpNil => {
+            .Nil => {
                 return simpleInstruction("OP_NIL", offset);
             },
-            .OpTrue => {
+            .True => {
                 return simpleInstruction("OP_TRUE", offset);
             },
-            .OpFalse => {
+            .False => {
                 return simpleInstruction("OP_FALSE", offset);
             },
-            .OpEqual => {
+            .Equal => {
                 return simpleInstruction("OP_EQUAL", offset);
             },
-            .OpGreater => {
+            .Greater => {
                 return simpleInstruction("OP_GREATER", offset);
             },
-            .OpLess => {
+            .Less => {
                 return simpleInstruction("OP_LESS", offset);
             },
-            .OpAdd => {
+            .Add => {
                 return simpleInstruction("OP_ADD", offset);
             },
-            .OpSubtract => {
+            .Subtract => {
                 return simpleInstruction("OP_SUBTRACT", offset);
             },
-            .OpMultiply => {
+            .Multiply => {
                 return simpleInstruction("OP_MULTIPLY", offset);
             },
-            .OpDivide => {
+            .Divide => {
                 return simpleInstruction("OP_DIVIDE", offset);
             },
-            .OpNot => {
+            .Not => {
                 return simpleInstruction("OP_NOT", offset);
             },
-            .OpNegate => {
+            .Negate => {
                 return simpleInstruction("OP_NEGATE", offset);
             },
-            .OpReturn => {
+            .Return => {
                 return simpleInstruction("OP_RETURN", offset);
             },
         }

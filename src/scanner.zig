@@ -103,6 +103,7 @@ pub const Scanner = struct {
                 const token: TokenType = if (self.match('=')) .GreaterEqual else .Greater;
                 return self.make_token(token);
             },
+            '"' => return self.string(),
             else => {
                 if (self.is_digit(c)) return self.number();
                 if (self.is_alpha(c)) return self.identifier();

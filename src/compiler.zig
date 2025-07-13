@@ -2,6 +2,7 @@ const std = @import("std");
 const scanner = @import("scanner.zig");
 const chunk = @import("chunk.zig");
 const value = @import("value.zig");
+const object = @import("object.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -49,7 +50,7 @@ fn get_rule(token_type: scanner.TokenType) ParseRule {
         .Less => .{ .prefix = null, .infix = binary, .precedence = .Comparison },
         .LessEqual => .{ .prefix = null, .infix = binary, .precedence = .Comparison },
         .Identifier => .{ .prefix = null, .infix = null, .precedence = .None },
-        .String => .{ .prefix = null, .infix = null, .precedence = .None },
+        .String => .{ .prefix = string, .infix = null, .precedence = .None },
         .Number => .{ .prefix = number, .infix = null, .precedence = .None },
         .And => .{ .prefix = null, .infix = null, .precedence = .None },
         .Class => .{ .prefix = null, .infix = null, .precedence = .None },
@@ -89,12 +90,14 @@ const Parser = struct {
 };
 
 const Compiler = struct {
+    allocator: Allocator,
     parser: Parser,
     scanner: scanner.Scanner,
     compilingChunk: *chunk.Chunk,
 
-    pub fn init(source: []const u8, chk: *chunk.Chunk) Compiler {
+    pub fn init(allocator: Allocator, source: []const u8, chk: *chunk.Chunk) Compiler {
         return .{
+            .allocator = allocator,
             .parser = Parser.init(),
             .scanner = scanner.Scanner.init(source),
             .compilingChunk = chk,
@@ -220,6 +223,13 @@ fn literal(comptime op_code: chunk.OpCode) ParseFn {
     }.emit_op_code;
 }
 
+fn string(c: *Compiler) !void {
+    // The +1 and -2 trim the leading and trailing quotation marks.
+    const string_literal = c.parser.previous.start[1 .. c.parser.previous.length - 1];
+    const obj = try object.copy_string(c.allocator, string_literal, &c.compilingChunk.objects);
+    try c.emit_constant(value.object_val(&obj.obj));
+}
+
 fn unary(c: *Compiler) !void {
     const operatorType = c.parser.previous.type;
 
@@ -254,8 +264,8 @@ fn binary(c: *Compiler) !void {
     }
 }
 
-pub fn compile(source: []const u8, chk: *chunk.Chunk) bool {
-    var c = Compiler.init(source, chk);
+pub fn compile(allocator: Allocator, source: []const u8, chk: *chunk.Chunk) bool {
+    var c = Compiler.init(allocator, source, chk);
     c.advance();
     c.expression() catch |err| {
         std.debug.print("Unhandled compile error: {any}\n", .{err});
@@ -272,7 +282,7 @@ test "compile true" {
     defer chk.deinit();
 
     const source = "true";
-    const result = compile(source, &chk);
+    const result = compile(allocator, source, &chk);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.True)), chk.code.items[0]);
@@ -285,7 +295,7 @@ test "compile false" {
     defer chk.deinit();
 
     const source = "false";
-    const result = compile(source, &chk);
+    const result = compile(allocator, source, &chk);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.False)), chk.code.items[0]);
@@ -298,9 +308,40 @@ test "compile nil" {
     defer chk.deinit();
 
     const source = "nil";
-    const result = compile(source, &chk);
+    const result = compile(allocator, source, &chk);
 
     try std.testing.expect(result);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Nil)), chk.code.items[0]);
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[1]);
+}
+
+test "compile string" {
+    const allocator = std.testing.allocator;
+    var chk = chunk.Chunk.init(allocator);
+    defer chk.deinit();
+
+    const source = "\"hello\" + \"world\"";
+    const result = compile(allocator, source, &chk);
+
+    {
+        try std.testing.expect(result);
+        try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Constant)), chk.code.items[0]);
+        const constant_index = chk.code.items[1];
+        const constant_value = chk.constants.values.items[constant_index];
+        try std.testing.expect(value.is_string(constant_value));
+        const string_obj = value.as_object(constant_value);
+        try std.testing.expectEqualSlices(u8, "hello", object.as_string_bytes(string_obj));
+    }
+
+    {
+        try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Constant)), chk.code.items[2]);
+        const constant_index = chk.code.items[3];
+        const constant_value = chk.constants.values.items[constant_index];
+        try std.testing.expect(value.is_string(constant_value));
+        const string_obj = value.as_object(constant_value);
+        try std.testing.expectEqualSlices(u8, "world", object.as_string_bytes(string_obj));
+    }
+
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Add)), chk.code.items[4]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[5]);
 }
