@@ -1,5 +1,8 @@
 const std = @import("std");
 const zlox = @import("root.zig");
+const debug = @import("debug.zig");
+
+const debug_flag = true;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -12,10 +15,24 @@ pub fn main() !void {
     var chk = zlox.chunk.Chunk.init(allocator);
     defer chk.deinit();
 
-    vm.interpret("print \"hello\" + \", \" + \"world\";", &chk) catch |err| {
+    const program =
+        \\var a = 1;
+        \\var b = 2;
+        \\{
+        \\    var c = 3;
+        \\    print a + b + c;
+        \\}
+        \\print a + b;
+    ;
+
+    vm.interpret(program, &chk) catch |err| {
         std.debug.print("Interpret error: {any}\n", .{err});
         return;
     };
+
+    if (debug_flag) {
+        debug.disassembleChunk(&chk, "test chunk");
+    }
 }
 
 test "simple test" {

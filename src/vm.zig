@@ -117,28 +117,33 @@ pub const VM = struct {
                     self.push(val);
                 },
                 .DefineGlobal => {
-                    const constant = self.read_byte();
-                    const name = object.as_string(value.as_object(self.chk.constants.values.items[constant]));
+                    const name = self.read_name();
                     self.globals.map.put(name.chars, self.peek(0)) catch return self.runtime_error("Out of memory.", .{});
                     _ = self.pop();
                 },
                 .GetGlobal => {
-                    const constant = self.read_byte();
-                    const name = object.as_string(value.as_object(self.chk.constants.values.items[constant]));
+                    const name = self.read_name();
                     const val = self.globals.map.get(name.chars) orelse {
                         return self.runtime_error("Undefined variable '{s}'.", .{name.chars});
                     };
                     self.push(val);
                 },
                 .SetGlobal => {
-                    const constant = self.read_byte();
-                    const name = object.as_string(value.as_object(self.chk.constants.values.items[constant]));
+                    const name = self.read_name();
                     const previous = self.globals.map.fetchPut(name.chars, self.peek(0)) catch return self.runtime_error("Out of memory", .{});
 
                     if (previous == null) {
                         _ = self.globals.map.remove(name.chars);
                         return self.runtime_error("Undefined variable '{s}'.", .{name.chars});
                     }
+                },
+                .GetLocal => {
+                    const slot = self.read_byte();
+                    self.push(self.stack[slot]);
+                },
+                .SetLocal => {
+                    const slot = self.read_byte();
+                    self.stack[slot] = self.peek(0);
                 },
                 .Pop => {
                     _ = self.pop();
@@ -182,6 +187,11 @@ pub const VM = struct {
         const byte = self.ip[0];
         self.ip += 1;
         return byte;
+    }
+
+    fn read_name(self: *VM) *object.ObjString {
+        const constant = self.read_byte();
+        return object.as_string(value.as_object(self.chk.constants.values.items[constant]));
     }
 };
 

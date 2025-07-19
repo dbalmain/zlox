@@ -90,12 +90,20 @@ const Parser = struct {
     }
 };
 
+const Local = struct {
+    name: scanner.Token,
+    depth: i32,
+};
+
 const Compiler = struct {
     allocator: Allocator,
     parser: Parser,
     scanner: scanner.Scanner,
     compilingChunk: *chunk.Chunk,
     strings: *table.Table(*object.ObjString),
+    locals: [256]Local,
+    localsTop: u16,
+    scopeDepth: i32,
 
     pub fn init(allocator: Allocator, source: []const u8, chk: *chunk.Chunk, strings: *table.Table(*object.ObjString)) Compiler {
         return .{
@@ -104,6 +112,9 @@ const Compiler = struct {
             .scanner = scanner.Scanner.init(source),
             .compilingChunk = chk,
             .strings = strings,
+            .locals = undefined,
+            .localsTop = 0,
+            .scopeDepth = 0,
         };
     }
 
@@ -182,7 +193,7 @@ const Compiler = struct {
         try self.parse_precedence(.Assignment);
     }
 
-    fn declaration(self: *Compiler) !void {
+    fn declaration(self: *Compiler) anyerror!void {
         if (self.match(.Var)) {
             try self.var_declaration();
         } else {
@@ -203,13 +214,57 @@ const Compiler = struct {
         self.define_variable(global);
     }
 
+    fn add_local(self: *Compiler, name: scanner.Token) void {
+        if (self.localsTop == 256) {
+            self.compile_error("Cannot add more than 256 locals");
+        } else {
+            self.locals[self.localsTop] = Local{
+                .name = name,
+                .depth = self.scopeDepth,
+            };
+            self.localsTop += 1;
+        }
+    }
+
     fn define_variable(self: *Compiler, global: u8) void {
+        if (self.scopeDepth > 0) {
+            self.mark_initialized();
+            return;
+        }
         self.emit_bytes(@intFromEnum(chunk.OpCode.DefineGlobal), global);
+    }
+
+    fn mark_initialized(self: *Compiler) void {
+        self.locals[self.localsTop - 1].depth = self.scopeDepth;
     }
 
     fn parse_variable(self: *Compiler, error_message: []const u8) !u8 {
         self.consume(.Identifier, error_message);
+
+        self.declare_variable();
+        if (self.scopeDepth > 0) {
+            return 0;
+        }
+
         return self.identifier_constant(&self.parser.previous);
+    }
+
+    fn declare_variable(self: *Compiler) void {
+        if (self.scopeDepth == 0) return;
+        const name = self.parser.previous;
+        self.add_local(name);
+    }
+
+    fn resolve_local(self: *Compiler, name: *const scanner.Token) !?u8 {
+        for (self.locals[0..self.localsTop], 0..) |local, i| {
+            if (name.length == local.name.length and std.mem.eql(u8, name.start[0..name.length], local.name.start[0..local.name.length])) {
+                if (local.depth == -1) {
+                    self.compile_error("Can't read local variable in its own initializer");
+                }
+                return @intCast(i);
+            }
+        }
+        return null;
     }
 
     fn identifier_constant(self: *Compiler, name: *const scanner.Token) !u8 {
@@ -220,8 +275,33 @@ const Compiler = struct {
     fn statement(self: *Compiler) !void {
         if (self.match(.Print)) {
             try self.print_statement();
+        } else if (self.match(.LeftBrace)) {
+            self.begin_scope();
+            try self.block();
+            self.end_scope();
         } else {
             try self.expression_statement();
+        }
+    }
+
+    fn block(self: *Compiler) !void {
+        while (!self.check(.RightBrace) and !self.check(.Eof)) {
+            try self.declaration();
+        }
+
+        self.consume(.RightBrace, "Expect '}' after block.");
+    }
+
+    fn begin_scope(self: *Compiler) void {
+        self.scopeDepth += 1;
+    }
+
+    fn end_scope(self: *Compiler) void {
+        self.scopeDepth -= 1;
+
+        while (self.localsTop > 0 and self.locals[self.localsTop - 1].depth > self.scopeDepth) {
+            self.emit_byte(@intFromEnum(chunk.OpCode.Pop));
+            self.localsTop -= 1;
         }
     }
 
@@ -315,12 +395,28 @@ fn string(c: *Compiler, _: bool) !void {
 }
 
 fn named_variable(c: *Compiler, name: scanner.Token, can_assign: bool) !void {
-    const arg = try c.identifier_constant(&name);
+    var get_op: chunk.OpCode = .GetGlobal;
+    var set_op: chunk.OpCode = .SetGlobal;
+    var arg: u8 = 0;
+
+    if (c.resolve_local(&name)) |maybe_local_index| {
+        if (maybe_local_index) |local_index| {
+            get_op = .GetLocal;
+            set_op = .SetLocal;
+            arg = local_index;
+        } else {
+            arg = try c.identifier_constant(&name);
+        }
+    } else |err| {
+        std.debug.print("Error resolving local: {any}", .{err});
+        return;
+    }
+
     if (can_assign and c.match(.Equal)) {
         try c.expression();
-        c.emit_bytes(@intFromEnum(chunk.OpCode.SetGlobal), arg);
+        c.emit_bytes(@intFromEnum(set_op), arg);
     } else {
-        c.emit_bytes(@intFromEnum(chunk.OpCode.GetGlobal), arg);
+        c.emit_bytes(@intFromEnum(get_op), arg);
     }
 }
 
@@ -457,15 +553,40 @@ test "compile string" {
     try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Return)), chk.code.items[6]);
 }
 
-test "compile print" {
+test "compile local var declaration" {
     const allocator = std.testing.allocator;
     var chk = chunk.Chunk.init(allocator);
     defer chk.deinit();
 
-    const source = "print 1 + 2;";
+    const source = "{\nvar a = 1;\nvar b = 2;\nprint a + b;\n}";
     var strings = table.Table(*object.ObjString).init(allocator);
     defer strings.deinit();
     const result = compile(allocator, source, &chk, &strings);
 
     try std.testing.expect(result);
+}
+
+test "compile global var declaration" {
+    const allocator = std.testing.allocator;
+    var chk = chunk.Chunk.init(allocator);
+    defer chk.deinit();
+
+    const source = "var a = 1;";
+    var strings = table.Table(*object.ObjString).init(allocator);
+    defer strings.deinit();
+    const result = compile(allocator, source, &chk, &strings);
+
+    try std.testing.expect(result);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.Constant)), chk.code.items[0]);
+    const constant_index = chk.code.items[1];
+    const constant_value = chk.constants.values.items[constant_index];
+    try std.testing.expect(value.is_number(constant_value));
+    try std.testing.expectEqual(1.0, value.as_number(constant_value));
+
+    try std.testing.expectEqual(@as(u8, @intFromEnum(chunk.OpCode.DefineGlobal)), chk.code.items[2]);
+    const global_index = chk.code.items[3];
+    const global_name_value = chk.constants.values.items[global_index];
+    try std.testing.expect(value.is_string(global_name_value));
+    const global_name_obj = value.as_object(global_name_value);
+    try std.testing.expectEqualSlices(u8, "a", object.as_string_bytes(global_name_obj));
 }
