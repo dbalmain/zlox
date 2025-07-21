@@ -16,13 +16,30 @@ pub fn main() !void {
     defer chk.deinit();
 
     const program =
-        \\var a = 1;
-        \\var b = 2;
-        \\{
-        \\    var c = 3;
-        \\    print a + b + c;
+        \\if (true) {
+        \\    print "if works!";
+        \\} else {
+        \\    print "else works!";
         \\}
-        \\print a + b;
+        \\
+        \\var i = 0;
+        \\while (i < 3) {
+        \\    print i;
+        \\    i = i + 1;
+        \\}
+        \\
+        \\if (true and false) {
+        \\    print "should not print";
+        \\} else {
+        \\    print "logical and works!";
+        \\}
+        \\
+        \\if (false or true) {
+        \\    print "logical or works!";
+        \\}
+        \\for (var i = 0; i < 10; i = i + 1) {
+        \\  print i;
+        \\}
     ;
 
     vm.interpret(program, &chk) catch |err| {

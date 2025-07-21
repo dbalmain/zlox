@@ -84,6 +84,15 @@ pub fn disassembleInstruction(ch: *const chunk.Chunk, offset: usize) usize {
         .Pop => {
             return simpleInstruction("OP_POP", offset);
         },
+        .Jump => {
+            return jumpInstruction("OP_JUMP", 1, ch, offset);
+        },
+        .JumpIfFalse => {
+            return jumpInstruction("OP_JUMP_IF_FALSE", 1, ch, offset);
+        },
+        .Loop => {
+            return jumpInstruction("OP_LOOP", -1, ch, offset);
+        },
     }
 }
 
@@ -104,4 +113,11 @@ fn byteInstruction(name: []const u8, ch: *const chunk.Chunk, offset: usize) usiz
     const slot = ch.code.items[offset + 1];
     std.debug.print("{s:<16} {d:>4}\n", .{ name, slot });
     return offset + 2;
+}
+
+fn jumpInstruction(name: []const u8, sign: i32, ch: *const chunk.Chunk, offset: usize) usize {
+    const jump_offset: u16 = (@as(u16, ch.code.items[offset + 1]) << 8) | ch.code.items[offset + 2];
+    const target = @as(i32, @intCast(offset + 3)) + sign * @as(i32, jump_offset);
+    std.debug.print("{s:<16} {d:>4} -> {d}\n", .{ name, offset, target });
+    return offset + 3;
 }

@@ -148,6 +148,18 @@ pub const VM = struct {
                 .Pop => {
                     _ = self.pop();
                 },
+                .Jump => {
+                    const offset = self.read_short();
+                    self.ip += offset;
+                },
+                .JumpIfFalse => {
+                    const offset = self.read_short();
+                    if (is_falsey(self.peek(0))) self.ip += offset;
+                },
+                .Loop => {
+                    const offset = self.read_short();
+                    self.ip -= offset;
+                },
             }
         }
     }
@@ -187,6 +199,12 @@ pub const VM = struct {
         const byte = self.ip[0];
         self.ip += 1;
         return byte;
+    }
+
+    fn read_short(self: *VM) u16 {
+        const high = self.read_byte();
+        const low = self.read_byte();
+        return (@as(u16, high) << 8) | low;
     }
 
     fn read_name(self: *VM) *object.ObjString {
