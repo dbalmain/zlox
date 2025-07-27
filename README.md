@@ -6,7 +6,11 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 14**: Chunks of Bytecode - Basic bytecode representation and virtual machine foundation
+- **Chapter 14**: Chunks of Bytecode - ✅ Complete with challenges
+  - Basic bytecode representation and virtual machine foundation
+  - Optimized line number encoding using skiplist approach
+  - Long Constants support for 24-bit constant indices
+  - Enhanced disassembler with proper line tracking
 
 ## Building and Running
 

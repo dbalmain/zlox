@@ -6,21 +6,31 @@ pub fn disassembleChunk(self: *const chunk.Chunk, name: []const u8) !void {
     std.debug.print("== {s} ==\n", .{name});
 
     var offset: usize = 0;
+    var line: ?usize = self.lines.items[0].line;
+    var line_index: usize = 1;
     while (offset < self.code.items.len) {
-        offset = try disassembleInstruction(self, offset);
+        if (line_index < self.lines.items.len and
+            offset >= self.lines.items[line_index].chunk_offset)
+        {
+            line = self.lines.items[line_index].line;
+            line_index += 1;
+        }
+        offset = try disassembleInstruction(self, offset, line);
+        line = null;
     }
 }
 
-pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize) !usize {
+pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?usize) !usize {
     std.debug.print("{d:0>4} ", .{offset});
-    if (offset > 0 and self.lines.items[offset] == self.lines.items[offset - 1]) {
-        std.debug.print("   | ", .{});
+    if (line) |l| {
+        std.debug.print("{d:>4} ", .{l});
     } else {
-        std.debug.print("{d:>4} ", .{self.lines.items[offset]});
+        std.debug.print("   | ", .{});
     }
     const instruction: chunk.OpCode = @enumFromInt(self.code.items[offset]);
     switch (instruction) {
         .Constant => return constantInstruction(self, offset),
+        .ConstantLong => return constantLongInstruction(self, offset),
         else => return simpleInstruction(instruction, offset),
     }
 }
@@ -36,4 +46,14 @@ fn constantInstruction(self: *const chunk.Chunk, offset: usize) !usize {
     value.print(self.constants.values.items[constant]);
     std.debug.print("'\n", .{});
     return offset + 2;
+}
+
+fn constantLongInstruction(self: *const chunk.Chunk, offset: usize) !usize {
+    const constant = @as(u24, self.code.items[offset + 1]) |
+        (@as(u24, self.code.items[offset + 2]) << 8) |
+        (@as(u24, self.code.items[offset + 3]) << 16);
+    std.debug.print("{s:<14} {d:>4} '", .{ "ConstantLong", constant });
+    value.print(self.constants.values.items[constant]);
+    std.debug.print("'\n", .{});
+    return offset + 4;
 }
