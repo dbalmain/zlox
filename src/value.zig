@@ -22,10 +22,7 @@ pub const ValueArray = struct {
         self.values.deinit();
     }
 
-    pub fn writeValue(self: *Self, value: Value) !u8 {
-        if (self.values.items.len == 256) {
-            return ValueError.ValueOverflow;
-        }
+    pub fn writeValue(self: *Self, value: Value) !u24 {
         try self.values.append(value);
         return @intCast(self.values.items.len - 1);
     }

@@ -7,10 +7,15 @@ pub fn main() !void {
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
     var chk = zlox.chunk.Chunk.init(allocator);
-    const byte = try chk.writeConstant(5);
-    try chk.writeCode(.Constant, 0);
-    try chk.writeByte(byte, 0);
-    try chk.writeCode(.Return, 0);
+    for (0..257) |i| {
+        try chk.writeConstant(i, i);
+        try chk.writeCode(.Return, i);
+    }
+
+    try chk.writeCode(.Return, 1);
+    try chk.writeCode(.Return, 1);
+    try chk.writeCode(.Return, 2);
+    try chk.writeCode(.Return, 2);
     try debug.disassembleChunk(&chk, "test chunk");
     chk.deinit();
 }

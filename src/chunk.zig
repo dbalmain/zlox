@@ -3,7 +3,14 @@ const value = @import("value.zig");
 
 pub const OpCode = enum(u8) {
     Constant,
+    ConstantLong,
     Return,
+};
+
+// Skiplist for mapping the code index to the line index
+const CodeLine = struct {
+    chunk_offset: u24,
+    line: u24,
 };
 
 pub const Chunk = struct {
@@ -11,13 +18,13 @@ pub const Chunk = struct {
 
     code: std.ArrayList(u8),
     constants: value.ValueArray,
-    lines: std.ArrayList(usize),
+    lines: std.ArrayList(CodeLine),
 
     pub fn init(allocator: std.mem.Allocator) Chunk {
         return .{
             .code = std.ArrayList(u8).init(allocator),
             .constants = value.ValueArray.init(allocator),
-            .lines = std.ArrayList(usize).init(allocator),
+            .lines = std.ArrayList(CodeLine).init(allocator),
         };
     }
 
@@ -27,17 +34,30 @@ pub const Chunk = struct {
         self.lines.deinit();
     }
 
-    pub fn writeByte(self: *Self, byte: u8, line: usize) !void {
-        try self.lines.append(line);
+    pub fn writeByte(self: *Self, byte: u8) !void {
         try self.code.append(byte);
     }
 
     pub fn writeCode(self: *Self, code: OpCode, line: usize) !void {
-        try self.lines.append(line);
+        if (self.lines.items.len == 0 or line != self.lines.items[self.lines.items.len - 1].line) {
+            try self.lines.append(CodeLine{
+                .chunk_offset = self.code.items.len,
+                .line = line,
+            });
+        }
         try self.code.append(@intFromEnum(code));
     }
 
-    pub fn writeConstant(self: *Self, val: value.Value) !u8 {
-        return try self.constants.writeValue(val);
+    pub fn writeConstant(self: *Self, val: value.Value, line: usize) !void {
+        const index = try self.constants.writeValue(val);
+        if (index > 255) {
+            try self.writeCode(.ConstantLong, line);
+            try self.writeByte(@intCast(index & 0xFF));
+            try self.writeByte(@intCast((index >> 8) & 0xFF));
+            try self.writeByte(@intCast((index >> 16) & 0xFF));
+        } else {
+            try self.writeCode(.Constant, line);
+            try self.writeByte(@intCast(index));
+        }
     }
 };
