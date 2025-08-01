@@ -4,6 +4,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Define a build option for tracing (zig build -Dtrace=true)
+    const trace = b.option(bool, "trace", "Enable detailed tracing output") orelse false;
+
     const lib = b.addStaticLibrary(.{
         .name = "zlox",
         .root_source_file = b.path("src/root.zig"),
@@ -19,6 +22,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    const options = b.addOptions();
+    options.addOption(bool, "trace", trace);
+    exe.root_module.addOptions("config", options);
 
     b.installArtifact(exe);
 

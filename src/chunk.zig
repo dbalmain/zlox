@@ -4,6 +4,11 @@ const value = @import("value.zig");
 pub const OpCode = enum(u8) {
     Constant,
     ConstantLong,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Negate,
     Return,
 };
 
@@ -38,17 +43,17 @@ pub const Chunk = struct {
         try self.code.append(byte);
     }
 
-    pub fn writeCode(self: *Self, code: OpCode, line: usize) !void {
+    pub fn writeCode(self: *Self, code: OpCode, line: u24) !void {
         if (self.lines.items.len == 0 or line != self.lines.items[self.lines.items.len - 1].line) {
             try self.lines.append(CodeLine{
-                .chunk_offset = self.code.items.len,
+                .chunk_offset = @intCast(self.code.items.len),
                 .line = line,
             });
         }
         try self.code.append(@intFromEnum(code));
     }
 
-    pub fn writeConstant(self: *Self, val: value.Value, line: usize) !void {
+    pub fn writeConstant(self: *Self, val: value.Value, line: u24) !void {
         const index = try self.constants.writeValue(val);
         if (index > 255) {
             try self.writeCode(.ConstantLong, line);
@@ -59,5 +64,16 @@ pub const Chunk = struct {
             try self.writeCode(.Constant, line);
             try self.writeByte(@intCast(index));
         }
+    }
+
+    pub fn getLine(self: *Self, offset: u24) u24 {
+        var line: u24 = 0;
+        for (self.lines.items) |code_line| {
+            if (offset < code_line.chunk_offset) {
+                return line;
+            }
+            line = code_line.line;
+        }
+        return line;
     }
 };

@@ -6,11 +6,11 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 14**: Chunks of Bytecode - ✅ Complete with challenges
-  - Basic bytecode representation and virtual machine foundation
-  - Optimized line number encoding using skiplist approach
-  - Long Constants support for 24-bit constant indices
-  - Enhanced disassembler with proper line tracking
+- **Chapter 15**: A Virtual Machine - ✅ Complete
+  - Stack-based bytecode virtual machine with arithmetic operations
+  - Runtime execution of bytecode with proper error handling
+  - Configurable trace mode for debugging VM execution
+  - Support for floating-point arithmetic and stack management
 
 ## Building and Running
 
@@ -21,8 +21,8 @@ zig build
 # Run the interpreter
 zig build run
 
-# Run with a file
-zig build run -- script.lox
+# Run with trace output (debug VM execution)
+zig build run -Dtrace=true
 
 # Run tests
 zig build test
@@ -31,6 +31,10 @@ zig build test
 ## Project Structure
 
 - `src/main.zig` - Main executable entry point
+- `src/vm.zig` - Virtual machine implementation
+- `src/chunk.zig` - Bytecode chunk representation
+- `src/value.zig` - Value types and operations
+- `src/debug.zig` - Disassembler and debugging utilities
 - `src/root.zig` - Library module exports
 - `build.zig` - Zig build configuration
 
