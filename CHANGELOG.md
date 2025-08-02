@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2025-08-02
+
+### Added
+- Chapter 15 Challenge 1: Multiple arithmetic expression demonstrations
+  - `1 * 2 + 3` - operator precedence with multiplication first
+  - `1 + 2 * 3` - operator precedence with addition deferred
+  - `3 - 2 - 1` - left-associative subtraction
+  - `1 + 2 * 3 - 4 / -5` - complex expression with multiple operators
+- Chapter 15 Challenge 2: Expression compilation without negate operation
+  - `4 - 3 * (0 - 2)` implemented using subtraction instead of negate
+- `Print` opcode for explicit value output during execution
+- Comprehensive main.zig demonstrations with proper scoping and cleanup
+
+### Changed
+- VM stack changed from fixed-size array to dynamic `ArrayList(Value)`
+- Stack management now uses `clearRetainingCapacity()` for efficient resets
+- Improved memory management with proper `init`/`deinit` patterns
+- Binary operations now use `comptime` parameter for operator selection
+- Negate operation optimized to modify stack top in-place
+- Enhanced error handling for stack operations with `StackUnderflow`
+- VM initialization now requires allocator parameter
+
+### Technical Details
+- Dynamic stack growth eliminates fixed 256-element limitation
+- Each challenge demonstration properly scoped with defer cleanup
+- Stack operations use ArrayList methods for bounds checking
+- Memory-efficient stack reuse between VM executions
+
 ## [0.15.0] - 2025-08-01
 
 ### Added

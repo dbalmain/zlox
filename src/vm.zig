@@ -18,23 +18,26 @@ const BinaryOperator = enum {
     Divide,
 };
 
-const STACK_MAX = 256;
+const STACK_START_CAPACITY = 256;
+
 pub const VM = struct {
     const Self = @This();
 
     chunk: *chunk.Chunk,
     ip: [*]u8,
-    stack: [STACK_MAX]value.Value,
-    sp: [*]value.Value,
+    stack: std.ArrayList(value.Value),
 
-    pub fn init(chk: *chunk.Chunk) Self {
+    pub fn init(chk: *chunk.Chunk, allocator: std.mem.Allocator) Self {
         const vm = Self{
             .chunk = chk,
             .ip = undefined,
-            .stack = .{0} ** STACK_MAX,
-            .sp = undefined,
+            .stack = std.ArrayList(value.Value).init(allocator),
         };
         return vm;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.stack.deinit();
     }
 
     pub fn run(self: *Self) !void {
@@ -56,17 +59,21 @@ pub const VM = struct {
             switch (instruction) {
                 .Constant => {
                     const constant = self.readConstant();
-                    self.push(constant);
+                    try self.push(constant);
                 },
                 .ConstantLong => {
                     const constant = self.readLongConstant();
-                    self.push(constant);
+                    try self.push(constant);
                 },
                 .Add => try self.binaryOperation(.Add),
                 .Subtract => try self.binaryOperation(.Subtract),
                 .Multiply => try self.binaryOperation(.Multiply),
                 .Divide => try self.binaryOperation(.Divide),
-                .Negate => self.push(-(try self.pop())),
+                .Negate => self.stack.items[self.stack.items.len - 1] *= -1,
+                .Print => {
+                    value.print(try self.pop());
+                    std.debug.print("\n", .{});
+                },
                 .Return => {
                     value.print(try self.pop());
                     std.debug.print("\n", .{});
@@ -76,9 +83,9 @@ pub const VM = struct {
             // print the stack AFTER the instruction is complete
             if (config.trace) {
                 std.debug.print("        | ", .{});
-                for (0..(&self.sp[0] - &self.stack[0])) |i| {
+                for (self.stack.items) |val| {
                     std.debug.print("[ ", .{});
-                    value.print(self.stack[i]);
+                    value.print(val);
                     std.debug.print(" ]", .{});
                 }
                 std.debug.print("\n", .{});
@@ -86,37 +93,32 @@ pub const VM = struct {
         }
     }
 
-    fn binaryOperation(self: *Self, operator: BinaryOperator) !void {
+    fn binaryOperation(self: *Self, comptime operator: BinaryOperator) !void {
         const right = try self.pop();
         const left = try self.pop();
         switch (operator) {
-            .Add => self.push(left + right),
-            .Subtract => self.push(left - right),
-            .Multiply => self.push(left * right),
+            .Add => try self.push(left + right),
+            .Subtract => try self.push(left - right),
+            .Multiply => try self.push(left * right),
             .Divide => {
                 if (right == 0.0) {
                     return InterpreterError.RuntimeError;
                 }
-                self.push(left / right);
+                try self.push(left / right);
             },
         }
     }
 
     fn resetStack(self: *Self) void {
-        self.sp = &self.stack;
+        self.stack.clearRetainingCapacity();
     }
 
-    fn push(self: *Self, val: value.Value) void {
-        self.sp[0] = val;
-        self.sp += 1;
+    fn push(self: *Self, val: value.Value) !void {
+        try self.stack.append(val);
     }
 
     fn pop(self: *Self) !value.Value {
-        if (self.sp == &self.stack) {
-            return InterpreterError.StackUnderflow;
-        }
-        self.sp -= 1;
-        return self.sp[0];
+        return self.stack.pop() orelse InterpreterError.StackUnderflow;
     }
 
     fn readCode(self: *Self) !chunk.OpCode {

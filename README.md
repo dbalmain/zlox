@@ -6,11 +6,12 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 15**: A Virtual Machine - ✅ Complete
+- **Chapter 15**: A Virtual Machine - ✅ Complete with Exercises
   - Stack-based bytecode virtual machine with arithmetic operations
   - Runtime execution of bytecode with proper error handling
   - Configurable trace mode for debugging VM execution
-  - Support for floating-point arithmetic and stack management
+  - Dynamic stack management using ArrayList for scalability
+  - Challenge exercises demonstrating operator precedence and expression compilation
 
 ## Building and Running
 

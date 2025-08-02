@@ -23,10 +23,11 @@ Your writing style:
 When updating documentation:
 1. First analyze what has changed in the codebase or project
 2. Identify which documentation files need updates
-3. Review existing content for accuracy and relevance
-4. Make precise, targeted updates that reflect current functionality
-5. Ensure all cross-references and links remain valid
-6. Verify that examples and code snippets still work
+3. ALWAYS review and update README.md to reflect current project state - never skip this step
+4. Review existing content for accuracy and relevance
+5. Make precise, targeted updates that reflect current functionality
+6. Ensure all cross-references and links remain valid
+7. Verify that examples and code snippets still work
 
 For CHANGELOG.md specifically:
 - Use semantic versioning (MAJOR.MINOR.PATCH)
