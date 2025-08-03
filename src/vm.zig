@@ -27,7 +27,7 @@ pub const VM = struct {
     ip: [*]u8,
     stack: std.ArrayList(value.Value),
 
-    pub fn init(chk: *chunk.Chunk, allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator, chk: *chunk.Chunk) Self {
         const vm = Self{
             .chunk = chk,
             .ip = undefined,

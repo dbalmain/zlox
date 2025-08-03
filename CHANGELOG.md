@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2025-08-03
+
+### Added
+- Chapter 16 - Scanning on Demand implementation
+- Complete lexical analyzer (`Scanner` struct) with proper bounds checking using end pointer
+- Token types for all Lox language constructs (keywords, operators, literals, punctuation)
+- String literal tokenization with escape sequence handling and line tracking
+- Number literal tokenization supporting both integers and floating-point values
+- Identifier tokenization with keyword recognition using trie-based approach
+- Comment handling (single-line `//` comments) 
+- Error token generation for invalid characters and unterminated strings
+- Command-line interface with REPL and file execution modes
+- Standard Unix exit codes via `ExitCode` enum with PascalCase naming
+- `exitWithError` helper function for consistent error reporting and process termination
+
+### Changed
+- Main function completely rewritten for Chapter 16 CLI interface
+- Replaced Chapter 15 challenge demonstrations with proper interpreter entry points
+- VM constructor signature changed from `init(chunk, allocator)` to `init(allocator, chunk)`
+- Scanner uses pointer-based bounds checking (`start`, `current`, `end` pointers)
+- Token structure uses `[*]const u8` for start pointer and `u24` for length and line numbers
+- Compiler module added as foundation for future parsing phases
+
+### Technical Details
+- Scanner implements on-demand tokenization without pre-processing entire source
+- Bounds safety achieved through end pointer comparison instead of source length tracking
+- Keyword recognition uses efficient character-by-character matching
+- Line number tracking handles newlines in string literals and comments
+- Error handling follows book's approach with Error tokens containing message text
+- CLI supports both interactive REPL mode and batch file processing
+
 ## [0.15.1] - 2025-08-02
 
 ### Added

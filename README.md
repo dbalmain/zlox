@@ -6,12 +6,11 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 15**: A Virtual Machine - ✅ Complete with Exercises
-  - Stack-based bytecode virtual machine with arithmetic operations
-  - Runtime execution of bytecode with proper error handling
-  - Configurable trace mode for debugging VM execution
-  - Dynamic stack management using ArrayList for scalability
-  - Challenge exercises demonstrating operator precedence and expression compilation
+- **Chapter 16**: Scanning on Demand - ✅ Complete
+  - Complete lexical analyzer with all Lox token types
+  - Interactive REPL and file execution modes
+  - Proper error handling with standard Unix exit codes
+  - Bounds-safe scanner implementation using end pointers
 
 ## Building and Running
 
@@ -19,8 +18,11 @@ This project implements the bytecode virtual machine from Part II of the book, w
 # Build the project
 zig build
 
-# Run the interpreter
+# Run the REPL (interactive mode)
 zig build run
+
+# Run a Lox file
+zig build run -- script.lox
 
 # Run with trace output (debug VM execution)
 zig build run -Dtrace=true
@@ -31,7 +33,9 @@ zig build test
 
 ## Project Structure
 
-- `src/main.zig` - Main executable entry point
+- `src/main.zig` - Main executable entry point with CLI interface
+- `src/scanner.zig` - Lexical analyzer for tokenizing Lox source code
+- `src/compiler.zig` - Compiler frontend (currently token printing)
 - `src/vm.zig` - Virtual machine implementation
 - `src/chunk.zig` - Bytecode chunk representation
 - `src/value.zig` - Value types and operations
