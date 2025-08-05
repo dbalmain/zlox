@@ -67,7 +67,7 @@ pub const Chunk = struct {
         }
     }
 
-    pub fn getLine(self: *Self, offset: u24) u24 {
+    pub fn getLine(self: *const Self, offset: u24) u24 {
         var line: u24 = 0;
         for (self.lines.items) |code_line| {
             if (offset < code_line.chunk_offset) {

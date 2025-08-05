@@ -8,16 +8,16 @@ const VM = @import("vm.zig");
 const ExitCode = enum(u8) {
     Success = 0,
     Usage = 64,
-    DataErr = 65,      // Compilation error
+    DataErr = 65, // Compilation error
     NoInput = 66,
     NoUser = 67,
     NoHost = 68,
     Unavailable = 69,
-    Software = 70,     // Runtime error  
+    Software = 70, // Runtime error
     OsErr = 71,
     OsFile = 72,
     CantCreat = 73,
-    IoErr = 74,        // File I/O error
+    IoErr = 74, // File I/O error
     TempFail = 75,
     Protocol = 76,
     NoPerm = 77,
@@ -63,8 +63,6 @@ fn repl(allocator: std.mem.Allocator) !void {
         };
         defer allocator.free(line);
         try interpret(allocator, line);
-
-        std.debug.print("{s}\n", .{line});
     }
 }
 
@@ -76,14 +74,23 @@ fn runFile(allocator: std.mem.Allocator, file_path: []const u8) !void {
     defer allocator.free(file_contents);
     interpret(allocator, file_contents) catch |err| {
         switch (err) {
-            error.ParserError, error.CompilerError => exitWithError("Compilation failed", .DataErr),
             error.RuntimeError => exitWithError("Runtime error", .Software),
             error.StackUnderflow => exitWithError("Stack underflow error", .Software),
+            error.UnexpectedError => exitWithError("Unexpected failure during compilation", .DataErr),
+            error.OutOfMemory => exitWithError("Out of memory", .Software),
+            error.CompileError => exitWithError("Compile error", .DataErr),
+            error.UnexpectedEof => exitWithError("Unexpected EOF", .DataErr),
+            error.ParseError => exitWithError("Parser Error", .DataErr),
         }
     };
 }
 
 fn interpret(allocator: std.mem.Allocator, source: []u8) !void {
-    compiler.compile(source);
-    _ = allocator;
+    var chunk = try compiler.compile(allocator, source);
+    defer chunk.deinit();
+
+    var vm = VM.VM.init(allocator, &chunk);
+    defer vm.deinit();
+
+    return vm.run();
 }

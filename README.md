@@ -6,11 +6,12 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 16**: Scanning on Demand - ✅ Complete
-  - Complete lexical analyzer with all Lox token types
-  - Interactive REPL and file execution modes
-  - Proper error handling with standard Unix exit codes
-  - Bounds-safe scanner implementation using end pointers
+- **Chapter 17**: Compiling Expressions - ✅ Complete
+  - Complete Pratt parser implementation with precedence climbing
+  - Full expression compilation for arithmetic operations (+, -, *, /)
+  - Unary minus operator and parenthesized grouping support
+  - Integrated compiler-VM pipeline with proper error handling
+  - Expression parsing with correct operator precedence and associativity
 
 ## Building and Running
 
@@ -35,7 +36,7 @@ zig build test
 
 - `src/main.zig` - Main executable entry point with CLI interface
 - `src/scanner.zig` - Lexical analyzer for tokenizing Lox source code
-- `src/compiler.zig` - Compiler frontend (currently token printing)
+- `src/compiler.zig` - Pratt parser compiler for expressions with precedence handling
 - `src/vm.zig` - Virtual machine implementation
 - `src/chunk.zig` - Bytecode chunk representation
 - `src/value.zig` - Value types and operations

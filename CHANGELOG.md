@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2025-08-05
+
+### Added
+- Chapter 17 - Compiling Expressions implementation
+- Complete Pratt parser with precedence climbing for expression compilation
+- Precedence system with proper operator hierarchy (Primary → Unary → Factor → Term → ...)
+- ParseRule structure mapping token types to prefix/infix parsing functions with precedence
+- Binary arithmetic operators: addition (+), subtraction (-), multiplication (*), division (/)
+- Unary minus operator (-) for numeric negation
+- Parenthesized grouping expressions with proper precedence handling
+- Number literal compilation with f64 floating-point parsing
+- Expression parsing functions: `number()`, `grouping()`, `unary()`, `binary()`
+- Compiler-VM integration pipeline in main.zig with proper error propagation
+- CompileError types: CompileError, UnexpectedEof, ParseError, UnexpectedError, OutOfMemory
+- Comprehensive error handling with line number reporting and token context
+
+### Changed
+- Compiler completely rewritten from token printing to full expression parser
+- Parser structure added with current/previous token tracking and error state management
+- VM constructor signature updated to accept const chunk pointer (`*const chunk.Chunk`)
+- Main interpret() function now uses compiler.compile() instead of direct VM execution
+- Error handling expanded to include all compiler error types in runFile()
+- Chunk.getLine() method signature changed to accept const self parameter
+- Compiler emits bytecode directly to chunk instead of just analyzing tokens
+
+### Technical Details
+- Pratt parser implements precedence climbing with ParseFn function pointers
+- ParseRule.precedence.next() method ensures correct left-associativity for binary operators
+- Expression compilation follows recursive descent with precedence-driven parsing
+- Token consumption uses advance() with automatic error token handling
+- Bytecode emission through emitCode(), emitByte(), emitConstant() helper methods
+- Parser error recovery skips malformed tokens and continues compilation
+- Compiler.parsePrecedence() drives the core parsing algorithm with precedence comparison
+- Integration maintains Chapter 16 REPL and file execution modes with enhanced error reporting
+
 ## [0.16.0] - 2025-08-03
 
 ### Added

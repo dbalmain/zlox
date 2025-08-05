@@ -5,8 +5,6 @@ const value = @import("value.zig");
 const debug = @import("debug.zig");
 
 pub const InterpreterError = error{
-    ParserError,
-    CompilerError,
     RuntimeError,
     StackUnderflow,
 };
@@ -23,11 +21,11 @@ const STACK_START_CAPACITY = 256;
 pub const VM = struct {
     const Self = @This();
 
-    chunk: *chunk.Chunk,
+    chunk: *const chunk.Chunk,
     ip: [*]u8,
     stack: std.ArrayList(value.Value),
 
-    pub fn init(allocator: std.mem.Allocator, chk: *chunk.Chunk) Self {
+    pub fn init(allocator: std.mem.Allocator, chk: *const chunk.Chunk) Self {
         const vm = Self{
             .chunk = chk,
             .ip = undefined,

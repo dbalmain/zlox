@@ -3,7 +3,8 @@
     "allow": [
       "Bash(zig build:*)",
       "Bash(find:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebFetch(domain:craftinginterpreters.com)"
     ],
     "deny": []
   }
