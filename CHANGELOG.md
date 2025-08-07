@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2025-08-07
+
+### Added
+- Chapter 18 - Types of Values implementation
+- Tagged union `Value` type with `nil`, `boolean`, and `number` variants for type safety
+- New OpCodes: `Nil`, `True`, `False` for literal value compilation
+- Comparison OpCodes: `Equal`, `Greater`, `Less` for relational operations
+- Logical NOT OpCode: `Not` for boolean negation with truthiness semantics
+- Literal parsing in compiler for boolean (`true`/`false`) and `nil` values
+- Comparison operators: equality (`==`, `!=`) and relational (`<`, `>`, `<=`, `>=`)
+- Logical NOT operator (`!`) with proper Lox truthiness rules
+- Type-safe arithmetic operations with runtime type checking
+- Comprehensive error messages for type mismatches and invalid operations
+- Value helper methods: `isNumber()`, `isBool()`, `isNil()`, `isFalsey()`, `equals()`
+- Convenience functions: `asBoolean()`, `asNumber()`, and constant values (`nil_val`, `true_val`, `false_val`)
+
+### Changed
+- Value system completely rewritten from simple `f64` to tagged union with type variants
+- VM arithmetic operations now include comprehensive type checking with descriptive errors
+- Compiler enhanced with `literal()` parsing function for boolean and nil values
+- Comparison parsing with proper precedence (equality lower than relational operators)
+- VM comparison operations implement proper Lox semantics (numbers only for relational, any types for equality)
+- Truthiness semantics implemented following Lox rules (nil and false are falsey, everything else truthy)
+- Value printing system updated to handle all three value types correctly
+- Debug output enhanced to display proper value representations
+
+### Technical Details
+- Tagged union provides memory efficiency (16 bytes per value) and type safety at compile time
+- Runtime type checking prevents invalid operations with clear error messages
+- Comparison operations handle mixed types correctly (error for relational, false for equality)
+- Truthiness evaluation centralized in `Value.isFalsey()` method
+- OpCode parsing uses `emitCodes()` for multi-byte instruction emission
+- VM execution maintains stack-based operations with proper type validation
+- Integration maintains backward compatibility with existing arithmetic and compilation pipeline
+
 ## [0.17.0] - 2025-08-05
 
 ### Added

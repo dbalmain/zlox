@@ -213,8 +213,8 @@ pub const Scanner = struct {
             'r' => self.checkKeyword(1, 6, "eturn", .Return),
             's' => self.checkKeyword(1, 5, "uper", .Super),
             't' => if (self.current - self.start > 1) switch (self.start[1]) {
-                'h' => self.checkKeyword(2, 3, "is", .This),
-                'r' => self.checkKeyword(2, 3, "ue", .True),
+                'h' => self.checkKeyword(2, 4, "is", .This),
+                'r' => self.checkKeyword(2, 4, "ue", .True),
                 else => .Identifier,
             } else .Identifier,
             'v' => return self.checkKeyword(1, 3, "ar", .Var),

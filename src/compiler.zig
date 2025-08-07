@@ -51,31 +51,31 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .Semicolon => ParseRule.init(null, null, .None),
         .Slash => ParseRule.init(null, binary, .Factor),
         .Star => ParseRule.init(null, binary, .Factor),
-        .Bang => ParseRule.init(null, null, .None),
-        .BangEqual => ParseRule.init(null, null, .None),
+        .Bang => ParseRule.init(unary, null, .None),
+        .BangEqual => ParseRule.init(null, binary, .Equality),
         .Equal => ParseRule.init(null, null, .None),
-        .EqualEqual => ParseRule.init(null, null, .None),
-        .Greater => ParseRule.init(null, null, .None),
-        .GreaterEqual => ParseRule.init(null, null, .None),
-        .Less => ParseRule.init(null, null, .None),
-        .LessEqual => ParseRule.init(null, null, .None),
-        .Identifier => ParseRule.init(null, null, .None),
+        .EqualEqual => ParseRule.init(null, binary, .Equality),
+        .Greater => ParseRule.init(null, binary, .Comparison),
+        .GreaterEqual => ParseRule.init(null, binary, .Comparison),
+        .Less => ParseRule.init(null, binary, .Comparison),
+        .LessEqual => ParseRule.init(null, binary, .Comparison),
+        .Identifier => ParseRule.init(null, binary, .None),
         .String => ParseRule.init(null, null, .None),
         .Number => ParseRule.init(number, null, .None),
         .And => ParseRule.init(null, null, .None),
         .Class => ParseRule.init(null, null, .None),
         .Else => ParseRule.init(null, null, .None),
-        .False => ParseRule.init(null, null, .None),
+        .False => ParseRule.init(literal, null, .None),
         .For => ParseRule.init(null, null, .None),
         .Fun => ParseRule.init(null, null, .None),
         .If => ParseRule.init(null, null, .None),
-        .Nil => ParseRule.init(null, null, .None),
+        .Nil => ParseRule.init(literal, null, .None),
         .Or => ParseRule.init(null, null, .None),
         .Print => ParseRule.init(null, null, .None),
         .Return => ParseRule.init(null, null, .None),
         .Super => ParseRule.init(null, null, .None),
         .This => ParseRule.init(null, null, .None),
-        .True => ParseRule.init(null, null, .None),
+        .True => ParseRule.init(literal, null, .None),
         .Var => ParseRule.init(null, null, .None),
         .While => ParseRule.init(null, null, .None),
         .Error => ParseRule.init(null, null, .None),
@@ -167,6 +167,15 @@ const Compiler = struct {
         };
     }
 
+    fn emitCodes(self: *Self, code1: chunk.OpCode, code2: chunk.OpCode) CompileError!void {
+        self.chunk.writeCode(code1, self.parser.previous.line) catch {
+            return CompileError.OutOfMemory;
+        };
+        self.chunk.writeCode(code2, self.parser.previous.line) catch {
+            return CompileError.OutOfMemory;
+        };
+    }
+
     fn emitCodeAndByte(self: *Self, code: chunk.OpCode, byte: u8) CompileError!void {
         try self.emitCode(code);
         try self.emitByte(byte);
@@ -202,7 +211,7 @@ const Compiler = struct {
             stderr.print(" at '{s}'", .{token.start[0..token.len]}) catch unreachable;
             self.parser.err = CompileError.CompileError;
         }
-        stderr.print("{s}\n", .{message}) catch unreachable;
+        stderr.print(" {s}\n", .{message}) catch unreachable;
     }
 
     fn compileError(self: *Self, message: []const u8) void {
@@ -241,7 +250,7 @@ fn number(c: *Compiler) CompileError!void {
         c.errorAtCurrent("Unable to parse 64bit float.");
         return;
     };
-    try c.emitConstant(val);
+    try c.emitConstant(value.asNumber(val));
 }
 
 fn grouping(c: *Compiler) CompileError!void {
@@ -249,11 +258,21 @@ fn grouping(c: *Compiler) CompileError!void {
     c.consume(.RightParen, "Expect ')' after expression.");
 }
 
+fn literal(c: *Compiler) CompileError!void {
+    switch (c.parser.previous.type) {
+        .False => try c.emitCode(.False),
+        .True => try c.emitCode(.True),
+        .Nil => try c.emitCode(.Nil),
+        else => unreachable,
+    }
+}
+
 fn unary(c: *Compiler) CompileError!void {
     const op_type = c.parser.previous.type;
     try c.parsePrecedence(.Unary);
     switch (op_type) {
         .Minus => try c.emitCode(.Negate),
+        .Bang => try c.emitCode(.Not),
         else => unreachable,
     }
 }
@@ -264,6 +283,12 @@ fn binary(c: *Compiler) CompileError!void {
     try c.parsePrecedence(rule.precedence.next());
 
     switch (op_type) {
+        .BangEqual => try c.emitCodes(.Equal, .Not),
+        .EqualEqual => try c.emitCode(.Equal),
+        .Greater => try c.emitCode(.Greater),
+        .GreaterEqual => try c.emitCodes(.Less, .Not),
+        .Less => try c.emitCode(.Less),
+        .LessEqual => try c.emitCodes(.Greater, .Not),
         .Plus => try c.emitCode(.Add),
         .Minus => try c.emitCode(.Subtract),
         .Star => try c.emitCode(.Multiply),

@@ -59,10 +59,10 @@ fn repl(allocator: std.mem.Allocator) !void {
                 try stdout.print("Quitting...\n", .{});
                 break;
             }
-            return err;
+            continue;
         };
         defer allocator.free(line);
-        try interpret(allocator, line);
+        interpret(allocator, line) catch {};
     }
 }
 

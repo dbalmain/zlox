@@ -14,6 +14,8 @@ const BinaryOperator = enum {
     Subtract,
     Multiply,
     Divide,
+    Less,
+    Greater,
 };
 
 const STACK_START_CAPACITY = 256;
@@ -63,17 +65,26 @@ pub const VM = struct {
                     const constant = self.readLongConstant();
                     try self.push(constant);
                 },
+                .Nil => try self.push(value.nil_val),
+                .True => try self.push(value.true_val),
+                .False => try self.push(value.false_val),
                 .Add => try self.binaryOperation(.Add),
                 .Subtract => try self.binaryOperation(.Subtract),
                 .Multiply => try self.binaryOperation(.Multiply),
                 .Divide => try self.binaryOperation(.Divide),
-                .Negate => self.stack.items[self.stack.items.len - 1] *= -1,
+                .Less => try self.binaryOperation(.Less),
+                .Greater => try self.binaryOperation(.Greater),
+                .Negate => if (self.peek(0).withMutableNumber()) |n| {
+                    n.* *= -1;
+                } else return runtimeError("Operand must be a number", .{}),
+                .Not => try self.push(value.asBoolean((try self.pop()).isFalsey())),
+                .Equal => try self.push(value.asBoolean((try self.pop()).equals(&try self.pop()))),
                 .Print => {
-                    value.print(try self.pop());
+                    (try self.pop()).print();
                     std.debug.print("\n", .{});
                 },
                 .Return => {
-                    value.print(try self.pop());
+                    (try self.pop()).print();
                     std.debug.print("\n", .{});
                     return;
                 },
@@ -83,7 +94,7 @@ pub const VM = struct {
                 std.debug.print("        | ", .{});
                 for (self.stack.items) |val| {
                     std.debug.print("[ ", .{});
-                    value.print(val);
+                    val.print();
                     std.debug.print(" ]", .{});
                 }
                 std.debug.print("\n", .{});
@@ -92,19 +103,24 @@ pub const VM = struct {
     }
 
     fn binaryOperation(self: *Self, comptime operator: BinaryOperator) !void {
-        const right = try self.pop();
-        const left = try self.pop();
-        switch (operator) {
-            .Add => try self.push(left + right),
-            .Subtract => try self.push(left - right),
-            .Multiply => try self.push(left * right),
-            .Divide => {
-                if (right == 0.0) {
-                    return InterpreterError.RuntimeError;
-                }
-                try self.push(left / right);
-            },
+        if ((try self.pop()).withNumber()) |right| {
+            if ((try self.pop()).withNumber()) |left| {
+                return switch (operator) {
+                    .Add => try self.push(value.asNumber(left + right)),
+                    .Subtract => try self.push(value.asNumber(left - right)),
+                    .Multiply => try self.push(value.asNumber(left * right)),
+                    .Divide => {
+                        if (right == 0.0) {
+                            return runtimeError("Division by 0", .{});
+                        }
+                        try self.push(value.asNumber(left / right));
+                    },
+                    .Less => try self.push(value.asBoolean(left < right)),
+                    .Greater => try self.push(value.asBoolean(left > right)),
+                };
+            }
         }
+        return runtimeError("Operands must be numbers", .{});
     }
 
     fn resetStack(self: *Self) void {
@@ -117,6 +133,10 @@ pub const VM = struct {
 
     fn pop(self: *Self) !value.Value {
         return self.stack.pop() orelse InterpreterError.StackUnderflow;
+    }
+
+    fn peek(self: *Self, comptime distance: usize) *value.Value {
+        return &self.stack.items[self.stack.items.len - 1 - distance];
     }
 
     fn readCode(self: *Self) !chunk.OpCode {
@@ -143,3 +163,8 @@ pub const VM = struct {
         return self.chunk.constants.values.items[index];
     }
 };
+
+fn runtimeError(comptime fmt: []const u8, args: anytype) InterpreterError {
+    std.debug.print(fmt, args);
+    return InterpreterError.RuntimeError;
+}

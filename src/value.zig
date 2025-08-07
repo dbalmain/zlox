@@ -1,8 +1,87 @@
 const std = @import("std");
-pub const Value = f64;
+pub const Value = union(enum) {
+    const Self = @This();
+    boolean: bool,
+    number: f64,
+    nil: f64,
 
-pub fn print(value: Value) void {
-    std.debug.print("{d}", .{value});
+    pub fn print(self: *const Self) void {
+        switch (self.*) {
+            .boolean => |b| std.debug.print("{}", .{b}),
+            .number => |n| std.debug.print("{d}", .{n}),
+            .nil => std.debug.print("nil", .{}),
+        }
+    }
+
+    pub fn isNumber(self: *const Value) bool {
+        switch (self.*) {
+            .number => true,
+            else => false,
+        }
+    }
+
+    pub fn withBoolean(self: *const Self) ?bool {
+        return switch (self.*) {
+            .boolean => |b| b,
+            else => null,
+        };
+    }
+
+    pub fn withNumber(self: *const Self) ?f64 {
+        return switch (self.*) {
+            .number => |n| n,
+            else => null,
+        };
+    }
+
+    pub fn withMutableNumber(self: *Self) ?*f64 {
+        return switch (self.*) {
+            .number => |*n| n,
+            else => null,
+        };
+    }
+
+    pub fn isBool(self: *const Self) bool {
+        switch (self.*) {
+            .boolean => true,
+            else => false,
+        }
+    }
+
+    pub fn isFalsey(self: *const Value) bool {
+        return switch (self.*) {
+            .boolean => |b| b == false,
+            .nil => true,
+            else => false,
+        };
+    }
+
+    pub fn isNil(self: *const Self) bool {
+        return switch (self.*) {
+            .nil => true,
+            else => false,
+        };
+    }
+
+    pub fn equals(self: *const Self, other: *const Value) bool {
+        return switch (self.*) {
+            .number => |n| if (other.withNumber()) |o| o == n else false,
+            .boolean => |b| if (other.withBoolean()) |o| o == b else false,
+            .nil => other.isNil(),
+        };
+    }
+};
+
+pub const nil_val = Value{ .nil = 0 };
+pub const true_val = Value{ .boolean = true };
+pub const false_val = Value{ .boolean = false };
+
+pub fn asBoolean(b: bool) Value {
+    return Value{ .boolean = b };
+}
+
+pub fn asNumber(n: f64) Value {
+    return Value{ .number = n };
 }
 
 pub const ValueError = error{ValueOverflow};

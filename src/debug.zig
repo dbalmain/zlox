@@ -43,7 +43,7 @@ fn simpleInstruction(code: chunk.OpCode, offset: usize) !usize {
 fn constantInstruction(self: *const chunk.Chunk, offset: usize) !usize {
     const constant = self.code.items[offset + 1];
     std.debug.print("{s:<14} {d:>4} '", .{ "Constant", constant });
-    value.print(self.constants.values.items[constant]);
+    self.constants.values.items[constant].print();
     std.debug.print("'\n", .{});
     return offset + 2;
 }
@@ -53,7 +53,7 @@ fn constantLongInstruction(self: *const chunk.Chunk, offset: usize) !usize {
         (@as(u24, self.code.items[offset + 2]) << 8) |
         (@as(u24, self.code.items[offset + 3]) << 16);
     std.debug.print("{s:<14} {d:>4} '", .{ "ConstantLong", constant });
-    value.print(self.constants.values.items[constant]);
+    self.constants.values.items[constant].print();
     std.debug.print("'\n", .{});
     return offset + 4;
 }

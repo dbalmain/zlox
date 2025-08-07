@@ -6,6 +6,14 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
+- **Chapter 18**: Types of Values - ✅ Complete
+  - Complete type system with nil, boolean, and number values using tagged unions
+  - Type-safe operations with comprehensive runtime type checking
+  - Comparison operators (==, !=, <, >, <=, >=) with proper type semantics
+  - Logical NOT operator (!) with Lox truthiness semantics
+  - Literal compilation for booleans (true, false) and nil values
+  - Memory-efficient 16-byte tagged union Value representation
+
 - **Chapter 17**: Compiling Expressions - ✅ Complete
   - Complete Pratt parser implementation with precedence climbing
   - Full expression compilation for arithmetic operations (+, -, *, /)
