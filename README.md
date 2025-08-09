@@ -6,6 +6,14 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
+- **Chapter 19**: Strings - ✅ Complete
+  - Complete string literal support with heap-allocated object system
+  - String concatenation with `+` operator and proper memory management
+  - String equality comparison and object-based value system
+  - Heap management with linked-list object tracking for future garbage collection
+  - Extensible object architecture supporting strings and functions via tagged unions
+  - Memory ownership semantics with `copyString()` and `takeString()` functions
+
 - **Chapter 18**: Types of Values - ✅ Complete
   - Complete type system with nil, boolean, and number values using tagged unions
   - Type-safe operations with comprehensive runtime type checking
@@ -42,12 +50,13 @@ zig build test
 
 ## Project Structure
 
-- `src/main.zig` - Main executable entry point with CLI interface
+- `src/main.zig` - Main executable entry point with CLI interface and heap management
 - `src/scanner.zig` - Lexical analyzer for tokenizing Lox source code
 - `src/compiler.zig` - Pratt parser compiler for expressions with precedence handling
-- `src/vm.zig` - Virtual machine implementation
+- `src/vm.zig` - Virtual machine implementation with object heap integration
 - `src/chunk.zig` - Bytecode chunk representation
-- `src/value.zig` - Value types and operations
+- `src/value.zig` - Value types and operations with object system support
+- `src/object.zig` - Object system with heap management and string operations
 - `src/debug.zig` - Disassembler and debugging utilities
 - `src/root.zig` - Library module exports
 - `build.zig` - Zig build configuration

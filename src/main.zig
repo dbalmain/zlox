@@ -2,6 +2,7 @@ const std = @import("std");
 const config = @import("config");
 const zlox = @import("root.zig");
 const compiler = @import("compiler.zig");
+const object = @import("object.zig");
 const debug = @import("debug.zig");
 const VM = @import("vm.zig");
 
@@ -86,10 +87,12 @@ fn runFile(allocator: std.mem.Allocator, file_path: []const u8) !void {
 }
 
 fn interpret(allocator: std.mem.Allocator, source: []u8) !void {
-    var chunk = try compiler.compile(allocator, source);
+    var heap = object.Heap.init(allocator);
+    defer heap.deinit();
+    var chunk = try compiler.compile(&heap, source);
     defer chunk.deinit();
 
-    var vm = VM.VM.init(allocator, &chunk);
+    var vm = VM.VM.init(&heap, &chunk);
     defer vm.deinit();
 
     return vm.run();

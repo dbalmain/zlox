@@ -2,6 +2,7 @@ const std = @import("std");
 const scanner = @import("scanner.zig");
 const chunk = @import("chunk.zig");
 const value = @import("value.zig");
+const object = @import("object.zig");
 const debug = @import("debug.zig");
 const config = @import("config");
 
@@ -59,8 +60,8 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .GreaterEqual => ParseRule.init(null, binary, .Comparison),
         .Less => ParseRule.init(null, binary, .Comparison),
         .LessEqual => ParseRule.init(null, binary, .Comparison),
-        .Identifier => ParseRule.init(null, binary, .None),
-        .String => ParseRule.init(null, null, .None),
+        .Identifier => ParseRule.init(null, null, .None),
+        .String => ParseRule.init(string, null, .None),
         .Number => ParseRule.init(number, null, .None),
         .And => ParseRule.init(null, null, .None),
         .Class => ParseRule.init(null, null, .None),
@@ -107,12 +108,14 @@ const Parser = struct {
 
 const Compiler = struct {
     const Self = @This();
+    heap: *object.Heap,
     scanner: scanner.Scanner,
     chunk: *chunk.Chunk,
     parser: Parser,
 
-    fn init(source: []const u8, chk: *chunk.Chunk) Self {
+    fn init(heap: *object.Heap, source: []const u8, chk: *chunk.Chunk) Self {
         return Compiler{
+            .heap = heap,
             .scanner = scanner.Scanner.init(source),
             .parser = Parser.init(),
             .chunk = chk,
@@ -219,9 +222,9 @@ const Compiler = struct {
     }
 };
 
-pub fn compile(allocator: std.mem.Allocator, source: []const u8) CompileError!chunk.Chunk {
-    var chk = chunk.Chunk.init(allocator);
-    var compiler = Compiler.init(source, &chk);
+pub fn compile(heap: *object.Heap, source: []const u8) CompileError!chunk.Chunk {
+    var chk = chunk.Chunk.init(heap.allocator);
+    var compiler = Compiler.init(heap, source, &chk);
     compiler.advance();
     compiler.expression() catch |err| {
         chk.deinit();
@@ -295,4 +298,10 @@ fn binary(c: *Compiler) CompileError!void {
         .Slash => try c.emitCode(.Divide),
         else => unreachable,
     }
+}
+
+fn string(c: *Compiler) CompileError!void {
+    const str = c.parser.previous.start[1 .. c.parser.previous.len - 1];
+    const strObj = object.copyString(c.heap, str) catch return CompileError.OutOfMemory;
+    try c.emitConstant(value.asObject(strObj));
 }

@@ -2,6 +2,7 @@ const std = @import("std");
 const config = @import("config");
 const chunk = @import("chunk.zig");
 const value = @import("value.zig");
+const object = @import("object.zig");
 const debug = @import("debug.zig");
 
 pub const InterpreterError = error{
@@ -26,12 +27,14 @@ pub const VM = struct {
     chunk: *const chunk.Chunk,
     ip: [*]u8,
     stack: std.ArrayList(value.Value),
+    heap: *object.Heap,
 
-    pub fn init(allocator: std.mem.Allocator, chk: *const chunk.Chunk) Self {
+    pub fn init(heap: *object.Heap, chk: *const chunk.Chunk) Self {
         const vm = Self{
+            .heap = heap,
             .chunk = chk,
             .ip = undefined,
-            .stack = std.ArrayList(value.Value).init(allocator),
+            .stack = std.ArrayList(value.Value).init(heap.allocator),
         };
         return vm;
     }
@@ -68,7 +71,15 @@ pub const VM = struct {
                 .Nil => try self.push(value.nil_val),
                 .True => try self.push(value.true_val),
                 .False => try self.push(value.false_val),
-                .Add => try self.binaryOperation(.Add),
+                .Add => if (self.peek(0).withObject()) |right| {
+                    if (self.peek(1).withObject()) |left| {
+                        // need to push. Maybe better not to use binaryOperation here? Or make it work with strings.
+                        _ = try self.pop();
+                        _ = try self.pop();
+                        try self.push(value.asObject(left.add(self.heap, right) catch
+                            return runtimeError("failed to add objects", .{})));
+                    } else return runtimeError("Operands must both be objects", .{});
+                } else try self.binaryOperation(.Add),
                 .Subtract => try self.binaryOperation(.Subtract),
                 .Multiply => try self.binaryOperation(.Multiply),
                 .Divide => try self.binaryOperation(.Divide),

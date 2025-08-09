@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2025-08-09
+
+### Added
+- Chapter 19 - Strings implementation with complete object system
+- New object system (`object.zig`) with heap management and garbage collection preparation
+  - `Heap` struct with linked-list object tracking and memory management
+  - `Obj` struct with extensible tagged union supporting strings and functions
+  - String concatenation via `add()` method with proper memory allocation
+  - Object equality comparison with type-safe string matching
+  - Memory ownership functions: `copyString()` (duplicates) and `takeString()` (takes ownership)
+- String literal support in compiler with proper quote handling and escape processing
+- String objects with `String { chars: []const u8 }` representation
+- Heap-integrated VM execution with object lifecycle management
+- Extended `Value` union with `obj: *object.Obj` variant for object references
+- Smart `+` operator handling both numeric addition and string concatenation
+- String-aware equality operations and truthiness evaluation
+- Object cleanup and memory deallocation throughout program lifecycle
+
+### Changed
+- Value system extended with object variant (`obj: *object.Obj`) alongside existing types
+- Compiler signature updated to accept heap parameter for object creation during compilation
+- VM constructor now requires heap parameter for object lifecycle management
+- String parsing function added to compiler for processing string literals
+- VM `Add` operation enhanced with intelligent string concatenation vs numeric addition
+- Value equality comparison extended to handle object references and string content
+- Main function updated to create and manage heap throughout program execution
+- Object integration throughout value printing, type checking, and operations
+
+### Technical Details
+- Heap management uses simple linked list for O(1) allocation, preparing for future garbage collection
+- Object system designed for extensibility with tagged union supporting current and future object types
+- String concatenation implemented via `std.mem.concat` with proper memory allocation
+- Memory ownership semantics clearly defined with copy vs take string creation functions
+- Type safety maintained with optional type checking and proper error handling
+- String representation uses `[]const u8` for UTF-8 support through Zig standard library
+- Object cleanup follows RAII patterns with proper `deinit` cascading
+- Performance appropriate for current implementation stage with optimization opportunities identified
+
+### Testing Verification
+- String literals: `"hello"`, `"hello world"`, `""`
+- String concatenation: `"hello" + "world"` → `"helloworld"`
+- Chained operations: `"a" + "b" + "c"` → `"abc"`
+- String equality: `"hello" == "hello"` → `true`, `"hello" != "world"` → `true`
+- Logical operations: `!"hello"` → `false` (strings are truthy)
+- Type safety: `"hello" + 1` produces proper error
+- Complex expressions: `("hello" + "world") + "!"` works correctly
+- Memory management: Heavy concatenation operations complete without leaks
+
 ## [0.18.0] - 2025-08-07
 
 ### Added
