@@ -4,11 +4,13 @@ pub const Heap = struct {
     const Self = @This();
     allocator: std.mem.Allocator,
     heap: ?*Obj,
+    interned_strings: std.StringHashMap(*Obj),
 
     pub fn init(allocator: std.mem.Allocator) Heap {
         return Heap{
             .allocator = allocator,
             .heap = null,
+            .interned_strings = std.StringHashMap(*Obj).init(allocator),
         };
     }
 
@@ -18,6 +20,34 @@ pub const Heap = struct {
             obj = o.next;
             o.deinit(self.allocator);
         }
+        self.interned_strings.deinit();
+    }
+
+    pub fn copyString(self: *Self, chars: []const u8) !*Obj {
+        if (self.interned_strings.get(chars)) |obj| {
+            return obj;
+        }
+        return self.makeString(try self.allocator.dupe(u8, chars));
+    }
+
+    pub fn takeString(self: *Self, chars: []const u8) !*Obj {
+        if (self.interned_strings.get(chars)) |obj| {
+            self.allocator.free(chars);
+            return obj;
+        }
+        return self.makeString(chars);
+    }
+
+    fn makeString(self: *Self, chars: []const u8) !*Obj {
+        const obj = try self.allocator.create(Obj);
+        obj.next = self.heap;
+        self.heap = obj;
+        obj.data = Obj.Data{
+            .string = String{ .chars = chars },
+        };
+        try self.interned_strings.put(chars, obj);
+
+        return obj;
     }
 };
 
@@ -65,37 +95,19 @@ pub const Obj = struct {
     }
 
     pub fn equals(self: *const Self, other: *const Self) bool {
-        return switch (self.*.data) {
-            .string => |s| if (other.withString()) |o| std.mem.eql(u8, s.chars, o.chars) else false,
-            .function => false,
-        };
+        return self == other;
     }
 
     pub fn add(self: *const Self, heap: *Heap, other: *const Self) !*Self {
         return switch (self.*.data) {
             .string => |s| if (other.withString()) |o|
-                takeString(heap, try std.mem.concat(heap.allocator, u8, &.{ s.chars, o.chars }))
+                heap.takeString(try std.mem.concat(heap.allocator, u8, &.{ s.chars, o.chars }))
             else
                 ObjError.TypeMismatch,
             else => ObjError.TypeMismatch,
         };
     }
 };
-
-pub fn copyString(heap: *Heap, str: []const u8) !*Obj {
-    return takeString(heap, try heap.allocator.dupe(u8, str));
-}
-
-pub fn takeString(heap: *Heap, chars: []const u8) !*Obj {
-    const obj = try heap.allocator.create(Obj);
-    obj.next = heap.heap;
-    heap.heap = obj;
-    obj.data = Obj.Data{
-        .string = String{ .chars = chars },
-    };
-
-    return obj;
-}
 
 const String = struct {
     const Self = @This();

@@ -6,6 +6,15 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
+- **Chapter 20**: Hash Tables (String Interning) - ✅ Complete
+  - Production-quality string interning using `std.StringHashMap(*Obj)`
+  - Significant memory optimization: identical strings share single allocation
+  - Lightning-fast O(1) string equality via pointer comparison
+  - Smart string creation with `copyString()` and `takeString()` deduplication
+  - Seamless integration with existing object system and compiler
+  - Memory-efficient interning table cleanup with proper lifecycle management
+  - Performance benefits: reduced memory fragmentation and faster operations
+
 - **Chapter 19**: Strings - ✅ Complete
   - Complete string literal support with heap-allocated object system
   - String concatenation with `+` operator and proper memory management

@@ -302,6 +302,6 @@ fn binary(c: *Compiler) CompileError!void {
 
 fn string(c: *Compiler) CompileError!void {
     const str = c.parser.previous.start[1 .. c.parser.previous.len - 1];
-    const strObj = object.copyString(c.heap, str) catch return CompileError.OutOfMemory;
+    const strObj = c.heap.copyString(str) catch return CompileError.OutOfMemory;
     try c.emitConstant(value.asObject(strObj));
 }
