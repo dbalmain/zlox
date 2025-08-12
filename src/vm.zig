@@ -27,6 +27,7 @@ pub const VM = struct {
     chunk: *const chunk.Chunk,
     ip: [*]u8,
     stack: std.ArrayList(value.Value),
+    globals: std.StringArrayHashMap(value.Value),
     heap: *object.Heap,
 
     pub fn init(heap: *object.Heap, chk: *const chunk.Chunk) Self {
@@ -35,12 +36,14 @@ pub const VM = struct {
             .chunk = chk,
             .ip = undefined,
             .stack = std.ArrayList(value.Value).init(heap.allocator),
+            .globals = std.StringArrayHashMap(value.Value).init(heap.allocator),
         };
         return vm;
     }
 
     pub fn deinit(self: *Self) void {
         self.stack.deinit();
+        self.globals.deinit();
     }
 
     pub fn run(self: *Self) !void {
@@ -60,14 +63,14 @@ pub const VM = struct {
             }
             const instruction = try self.readCode();
             switch (instruction) {
-                .Constant => {
-                    const constant = self.readConstant();
-                    try self.push(constant);
-                },
-                .ConstantLong => {
-                    const constant = self.readLongConstant();
-                    try self.push(constant);
-                },
+                .Constant => try self.push(self.readConstant()),
+                .ConstantLong => try self.push(self.readLongConstant()),
+                .DefineGlobal => try self.defineGlobalVar(self.readConstant().asStringChars()),
+                .DefineGlobalLong => try self.defineGlobalVar(self.readLongConstant().asStringChars()),
+                .SetGlobal => try self.setGlobalVar(self.readConstant().asStringChars()),
+                .SetGlobalLong => try self.setGlobalVar(self.readLongConstant().asStringChars()),
+                .GetGlobal => try self.getGlobalVar(self.readConstant().asStringChars()),
+                .GetGlobalLong => try self.getGlobalVar(self.readLongConstant().asStringChars()),
                 .Nil => try self.push(value.nil_val),
                 .True => try self.push(value.true_val),
                 .False => try self.push(value.false_val),
@@ -94,11 +97,16 @@ pub const VM = struct {
                     (try self.pop()).print();
                     std.debug.print("\n", .{});
                 },
-                .Return => {
-                    (try self.pop()).print();
-                    std.debug.print("\n", .{});
-                    return;
+                .Pop => {
+                    _ = try self.pop();
                 },
+                .Return => return,
+                .Class => {},
+                .Fun => {},
+                .Var => {},
+                .For => {},
+                .If => {},
+                .While => {},
             }
             // print the stack AFTER the instruction is complete
             if (config.trace) {
@@ -172,6 +180,25 @@ pub const VM = struct {
             @as(u24, self.readByte()) << 8 |
             @as(u24, self.readByte()) << 16;
         return self.chunk.constants.values.items[index];
+    }
+
+    fn defineGlobalVar(self: *Self, name: []const u8) !void {
+        // don't pop before adding the value to the table to prevent garbage collection
+        try self.globals.put(name, self.peek(0).*);
+        _ = try self.pop();
+    }
+
+    fn setGlobalVar(self: *Self, name: []const u8) !void {
+        const previous = try self.globals.fetchPut(name, self.peek(0).*);
+        if (previous == null) {
+            _ = self.globals.swapRemove(name);
+            return runtimeError("undefined variable '{s}'.", .{name});
+        }
+    }
+
+    fn getGlobalVar(self: *Self, name: []const u8) !void {
+        try self.push(self.globals.get(name) orelse
+            return runtimeError("undefined variable '{s}'.", .{name}));
     }
 };
 

@@ -29,8 +29,8 @@ pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?us
     }
     const instruction: chunk.OpCode = @enumFromInt(self.code.items[offset]);
     switch (instruction) {
-        .Constant => return constantInstruction(self, offset),
-        .ConstantLong => return constantLongInstruction(self, offset),
+        .Constant, .DefineGlobal, .SetGlobal, .GetGlobal => return constantInstruction(self, offset, instruction),
+        .ConstantLong, .DefineGlobalLong, .SetGlobalLong, .GetGlobalLong => return constantLongInstruction(self, offset, instruction),
         else => return simpleInstruction(instruction, offset),
     }
 }
@@ -40,19 +40,19 @@ fn simpleInstruction(code: chunk.OpCode, offset: usize) !usize {
     return offset + 1;
 }
 
-fn constantInstruction(self: *const chunk.Chunk, offset: usize) !usize {
+fn constantInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
     const constant = self.code.items[offset + 1];
-    std.debug.print("{s:<14} {d:>4} '", .{ "Constant", constant });
+    std.debug.print("{s:<18} {d:>4} '", .{ @tagName(code), constant });
     self.constants.values.items[constant].print();
     std.debug.print("'\n", .{});
     return offset + 2;
 }
 
-fn constantLongInstruction(self: *const chunk.Chunk, offset: usize) !usize {
+fn constantLongInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
     const constant = @as(u24, self.code.items[offset + 1]) |
         (@as(u24, self.code.items[offset + 2]) << 8) |
         (@as(u24, self.code.items[offset + 3]) << 16);
-    std.debug.print("{s:<14} {d:>4} '", .{ "ConstantLong", constant });
+    std.debug.print("{s:<18} {d:>4} '", .{ @tagName(code), constant });
     self.constants.values.items[constant].print();
     std.debug.print("'\n", .{});
     return offset + 4;

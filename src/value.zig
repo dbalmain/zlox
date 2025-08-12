@@ -96,6 +96,16 @@ pub const Value = union(enum) {
             else => null,
         };
     }
+
+    pub fn asStringChars(self: *const Self) []const u8 {
+        switch (self.*) {
+            .obj => |o| switch (o.data) {
+                .string => |s| return s.chars,
+                else => unreachable,
+            },
+            else => unreachable,
+        }
+    }
 };
 
 pub const nil_val = Value{ .nil = 0 };

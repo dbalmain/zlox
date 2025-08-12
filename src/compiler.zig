@@ -60,7 +60,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .GreaterEqual => ParseRule.init(null, binary, .Comparison),
         .Less => ParseRule.init(null, binary, .Comparison),
         .LessEqual => ParseRule.init(null, binary, .Comparison),
-        .Identifier => ParseRule.init(null, null, .None),
+        .Identifier => ParseRule.init(variable, null, .None),
         .String => ParseRule.init(string, null, .None),
         .Number => ParseRule.init(number, null, .None),
         .And => ParseRule.init(null, null, .None),
@@ -96,12 +96,10 @@ const Parser = struct {
     const Self = @This();
     current: scanner.Token,
     previous: scanner.Token,
-    err: ?CompileError,
     fn init() Self {
         return Self{
             .current = undefined,
             .previous = undefined,
-            .err = null,
         };
     }
 };
@@ -112,6 +110,9 @@ const Compiler = struct {
     scanner: scanner.Scanner,
     chunk: *chunk.Chunk,
     parser: Parser,
+    can_assign: bool,
+    panic_mode: bool,
+    err: ?CompileError,
 
     fn init(heap: *object.Heap, source: []const u8, chk: *chunk.Chunk) Self {
         return Compiler{
@@ -119,6 +120,9 @@ const Compiler = struct {
             .scanner = scanner.Scanner.init(source),
             .parser = Parser.init(),
             .chunk = chk,
+            .can_assign = true,
+            .err = null,
+            .panic_mode = false,
         };
     }
 
@@ -128,11 +132,15 @@ const Compiler = struct {
         if (prefixRule == null) {
             return self.compileError("Expect expression.");
         }
+        if (self.can_assign and !precedence.le(.Assignment)) self.can_assign = false;
         try prefixRule.?(self);
         while (precedence.le(getRule(self.parser.current.type).precedence)) {
             self.advance();
             const infixRule = getRule(self.parser.previous.type).infix.?;
             try infixRule(self);
+        }
+        if (precedence.le(.Assignment) and self.match(.Equal)) {
+            self.compileError("Invalid assignment target.");
         }
     }
 
@@ -150,12 +158,22 @@ const Compiler = struct {
         }
     }
 
-    fn consume(self: *Self, token_type: scanner.TokenType, message: []const u8) void {
+    fn consume(self: *Self, comptime token_type: scanner.TokenType, message: []const u8) void {
         if (self.parser.current.type == token_type) {
             self.advance();
         } else {
             self.errorAtCurrent(message);
         }
+    }
+
+    fn match(self: *Self, comptime token_type: scanner.TokenType) bool {
+        if (!self.check(token_type)) return false;
+        self.advance();
+        return true;
+    }
+
+    fn check(self: *Self, comptime token_type: scanner.TokenType) bool {
+        return self.parser.current.type == token_type;
     }
 
     fn emitByte(self: *Self, byte: u8) CompileError!void {
@@ -203,16 +221,18 @@ const Compiler = struct {
     }
 
     fn errorAt(self: *Self, token: *scanner.Token, message: []const u8) void {
+        if (self.panic_mode) return;
+        self.panic_mode = true;
         const stderr = std.io.getStdErr().writer();
         stderr.print("[line {d}] Error", .{token.line}) catch {};
         if (token.type == .Eof) {
             stderr.print(" at end", .{}) catch unreachable;
-            self.parser.err = CompileError.UnexpectedEof;
+            self.err = CompileError.UnexpectedEof;
         } else if (token.type == .Error) {
-            self.parser.err = CompileError.ParseError;
+            self.err = CompileError.ParseError;
         } else {
             stderr.print(" at '{s}'", .{token.start[0..token.len]}) catch unreachable;
-            self.parser.err = CompileError.CompileError;
+            self.err = CompileError.CompileError;
         }
         stderr.print(" {s}\n", .{message}) catch unreachable;
     }
@@ -220,32 +240,112 @@ const Compiler = struct {
     fn compileError(self: *Self, message: []const u8) void {
         self.errorAt(&self.parser.previous, message);
     }
-};
 
-pub fn compile(heap: *object.Heap, source: []const u8) CompileError!chunk.Chunk {
-    var chk = chunk.Chunk.init(heap.allocator);
-    var compiler = Compiler.init(heap, source, &chk);
-    compiler.advance();
-    compiler.expression() catch |err| {
-        chk.deinit();
-        return err;
-    };
-    compiler.consume(.Eof, "Expect end of expression");
-    compiler.endCompiler() catch |err| {
-        chk.deinit();
-        return err;
-    };
-    if (compiler.parser.err) |err| {
-        if (config.trace) {
-            debug.disassembleChunk(&chk, "source") catch {
+    fn synchronize(self: *Self) void {
+        self.panic_mode = false;
+        while (self.parser.current.type != .Eof) {
+            if (self.parser.previous.type == .Semicolon) return;
+            switch (self.parser.current.type) {
+                .Class, .Fun, .Var, .For, .If, .While, .Print, .Return => return,
+                else => {},
+            }
+
+            self.advance();
+        }
+    }
+
+    fn declaration(self: *Self) CompileError!void {
+        self.can_assign = true;
+        if (self.match(.Var)) {
+            try self.varDeclaration();
+        } else {
+            try self.statement();
+        }
+        if (self.panic_mode) self.synchronize();
+    }
+
+    fn varDeclaration(self: *Self) CompileError!void {
+        const global = try self.parseVariable("Expect variable name.");
+
+        if (self.match(.Equal)) {
+            try self.expression();
+        } else {
+            try self.emitCode(.Nil);
+        }
+        self.consume(.Semicolon, "Expect ';' after variable declaration.");
+
+        try self.defineVariable(global);
+    }
+
+    fn defineVariable(self: *Self, index: u24) CompileError!void {
+        self.chunk.defineVariable(index, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+    }
+
+    fn statement(self: *Self) CompileError!void {
+        if (self.match(.Print)) {
+            try self.printStatement();
+        } else {
+            try self.expressionStatement();
+        }
+    }
+
+    fn parseVariable(self: *Self, error_message: []const u8) CompileError!u24 {
+        self.consume(.Identifier, error_message);
+        return self.identifierConstant(&self.parser.previous);
+    }
+
+    fn identifierConstant(self: *Self, name: *scanner.Token) CompileError!u24 {
+        const str = self.heap.copyString(name.start[0..name.len]) catch return CompileError.OutOfMemory;
+        return self.chunk.makeConstant(value.asObject(str)) catch return CompileError.OutOfMemory;
+    }
+
+    fn namedVariable(self: *Self, name: *scanner.Token) CompileError!void {
+        const index = try self.identifierConstant(name);
+        if (self.can_assign and self.match(.Equal)) {
+            try expression(self);
+            try self.setGlobal(index);
+        } else {
+            try self.getGlobal(index);
+        }
+    }
+
+    fn setGlobal(self: *Self, index: u24) CompileError!void {
+        self.chunk.setGlobal(index, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+    }
+
+    fn getGlobal(self: *Self, index: u24) CompileError!void {
+        self.chunk.getGlobal(index, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+    }
+
+    fn printStatement(self: *Self) CompileError!void {
+        try expression(self);
+        self.consume(.Semicolon, "Expect ';' after print statement.");
+        try self.emitCode(.Print);
+    }
+
+    fn expressionStatement(self: *Self) CompileError!void {
+        try expression(self);
+        self.consume(.Semicolon, "Expect ';' after expression.");
+        try self.emitCode(.Pop);
+    }
+
+    pub fn run(self: *Self) CompileError!void {
+        self.advance();
+        while (!self.match(.Eof)) {
+            try self.declaration();
+        }
+        try self.endCompiler();
+        if (self.err) |err| {
+            debug.disassembleChunk(self.chunk, "source") catch {
                 std.debug.print("Error disassembling chunk", .{});
             };
+            return err;
         }
-        chk.deinit();
-        return err;
     }
-    return chk;
-}
+};
 
 fn number(c: *Compiler) CompileError!void {
     const token = c.parser.previous;
@@ -304,4 +404,18 @@ fn string(c: *Compiler) CompileError!void {
     const str = c.parser.previous.start[1 .. c.parser.previous.len - 1];
     const strObj = c.heap.copyString(str) catch return CompileError.OutOfMemory;
     try c.emitConstant(value.asObject(strObj));
+}
+
+fn variable(c: *Compiler) CompileError!void {
+    try c.namedVariable(&c.parser.previous);
+}
+
+pub fn compile(heap: *object.Heap, source: []const u8) CompileError!chunk.Chunk {
+    var chk = chunk.Chunk.init(heap.allocator);
+    errdefer chk.deinit();
+    var compiler = Compiler.init(heap, source, &chk);
+    try compiler.run();
+    if (compiler.err) |err| return err;
+
+    return chk;
 }

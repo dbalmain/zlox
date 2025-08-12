@@ -6,37 +6,17 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 20**: Hash Tables (String Interning) - ✅ Complete
-  - Production-quality string interning using `std.StringHashMap(*Obj)`
-  - Significant memory optimization: identical strings share single allocation
-  - Lightning-fast O(1) string equality via pointer comparison
-  - Smart string creation with `copyString()` and `takeString()` deduplication
-  - Seamless integration with existing object system and compiler
-  - Memory-efficient interning table cleanup with proper lifecycle management
-  - Performance benefits: reduced memory fragmentation and faster operations
-
-- **Chapter 19**: Strings - ✅ Complete
-  - Complete string literal support with heap-allocated object system
-  - String concatenation with `+` operator and proper memory management
-  - String equality comparison and object-based value system
-  - Heap management with linked-list object tracking for future garbage collection
-  - Extensible object architecture supporting strings and functions via tagged unions
-  - Memory ownership semantics with `copyString()` and `takeString()` functions
-
-- **Chapter 18**: Types of Values - ✅ Complete
-  - Complete type system with nil, boolean, and number values using tagged unions
-  - Type-safe operations with comprehensive runtime type checking
-  - Comparison operators (==, !=, <, >, <=, >=) with proper type semantics
-  - Logical NOT operator (!) with Lox truthiness semantics
-  - Literal compilation for booleans (true, false) and nil values
-  - Memory-efficient 16-byte tagged union Value representation
-
-- **Chapter 17**: Compiling Expressions - ✅ Complete
-  - Complete Pratt parser implementation with precedence climbing
-  - Full expression compilation for arithmetic operations (+, -, *, /)
-  - Unary minus operator and parenthesized grouping support
-  - Integrated compiler-VM pipeline with proper error handling
-  - Expression parsing with correct operator precedence and associativity
+- **Chapter 21**: Global Variables - ✅ Complete
+  - Complete statement system with declaration, assignment, and print statements
+  - Global variable storage using efficient `StringArrayHashMap` in VM
+  - Variable declarations with `var name = value;` and `var name;` (defaults to nil)
+  - Variable assignment with `variable = value` and proper validation
+  - Variable access with identifier resolution and undefined variable detection
+  - Expression statements with automatic result disposal using Pop instruction
+  - Print statements with `print expression;` syntax
+  - Advanced assignment validation preventing invalid targets like `1 + 2 = 3`
+  - Sophisticated error handling with panic mode and synchronization recovery
+  - Clean compiler architecture using state management instead of parameter threading
 
 ## Building and Running
 

@@ -4,9 +4,16 @@ const value = @import("value.zig");
 pub const OpCode = enum(u8) {
     Constant,
     ConstantLong,
+    DefineGlobal,
+    DefineGlobalLong,
+    GetGlobal,
+    GetGlobalLong,
+    SetGlobal,
+    SetGlobalLong,
     Nil,
     True,
     False,
+    Pop,
     Equal,
     Greater,
     Less,
@@ -16,6 +23,12 @@ pub const OpCode = enum(u8) {
     Divide,
     Not,
     Negate,
+    Class,
+    Fun,
+    Var,
+    For,
+    If,
+    While,
     Print,
     Return,
 };
@@ -61,17 +74,37 @@ pub const Chunk = struct {
         try self.code.append(@intFromEnum(code));
     }
 
-    pub fn writeConstant(self: *Self, val: value.Value, line: u24) !void {
-        const index = try self.constants.writeValue(val);
+    pub fn makeConstant(self: *Self, val: value.Value) !u24 {
+        return self.constants.writeValue(val);
+    }
+
+    fn writeMaybeLongArg(self: *Self, index: u24, line: u24, comptime shortCode: OpCode, comptime longCode: OpCode) !void {
         if (index > 255) {
-            try self.writeCode(.ConstantLong, line);
+            try self.writeCode(longCode, line);
             try self.writeByte(@intCast(index & 0xFF));
             try self.writeByte(@intCast((index >> 8) & 0xFF));
             try self.writeByte(@intCast((index >> 16) & 0xFF));
         } else {
-            try self.writeCode(.Constant, line);
+            try self.writeCode(shortCode, line);
             try self.writeByte(@intCast(index));
         }
+    }
+
+    pub fn writeConstant(self: *Self, val: value.Value, line: u24) !void {
+        const index = try self.makeConstant(val);
+        try self.writeMaybeLongArg(index, line, .Constant, .ConstantLong);
+    }
+
+    pub fn defineVariable(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .DefineGlobal, .DefineGlobalLong);
+    }
+
+    pub fn getGlobal(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .GetGlobal, .GetGlobalLong);
+    }
+
+    pub fn setGlobal(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .SetGlobal, .SetGlobalLong);
     }
 
     pub fn getLine(self: *const Self, offset: u24) u24 {
