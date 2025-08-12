@@ -113,6 +113,7 @@ const Compiler = struct {
     can_assign: bool,
     panic_mode: bool,
     err: ?CompileError,
+    names: std.StringHashMap(u24),
 
     fn init(heap: *object.Heap, source: []const u8, chk: *chunk.Chunk) Self {
         return Compiler{
@@ -123,7 +124,12 @@ const Compiler = struct {
             .can_assign = true,
             .err = null,
             .panic_mode = false,
+            .names = std.StringHashMap(u24).init(heap.allocator),
         };
+    }
+
+    fn deinit(self: *Self) void {
+        self.names.deinit();
     }
 
     fn parsePrecedence(self: *Self, precedence: Precedence) CompileError!void {
@@ -292,16 +298,23 @@ const Compiler = struct {
 
     fn parseVariable(self: *Self, error_message: []const u8) CompileError!u24 {
         self.consume(.Identifier, error_message);
-        return self.identifierConstant(&self.parser.previous);
+        return self.makeIdentifier(&self.parser.previous);
     }
 
-    fn identifierConstant(self: *Self, name: *scanner.Token) CompileError!u24 {
-        const str = self.heap.copyString(name.start[0..name.len]) catch return CompileError.OutOfMemory;
-        return self.chunk.makeConstant(value.asObject(str)) catch return CompileError.OutOfMemory;
+    fn makeIdentifier(self: *Self, name_token: *scanner.Token) CompileError!u24 {
+        const name = name_token.start[0..name_token.len];
+        if (self.names.get(name)) |index| {
+            return index;
+        } else {
+            const index: u24 = @intCast(self.chunk.names.items.len);
+            self.chunk.names.append(name) catch return CompileError.OutOfMemory;
+            self.names.put(name, index) catch return CompileError.OutOfMemory;
+            return index;
+        }
     }
 
     fn namedVariable(self: *Self, name: *scanner.Token) CompileError!void {
-        const index = try self.identifierConstant(name);
+        const index = try self.makeIdentifier(name);
         if (self.can_assign and self.match(.Equal)) {
             try expression(self);
             try self.setGlobal(index);
@@ -414,6 +427,7 @@ pub fn compile(heap: *object.Heap, source: []const u8) CompileError!chunk.Chunk 
     var chk = chunk.Chunk.init(heap.allocator);
     errdefer chk.deinit();
     var compiler = Compiler.init(heap, source, &chk);
+    defer compiler.deinit();
     try compiler.run();
     if (compiler.err) |err| return err;
 

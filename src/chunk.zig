@@ -45,12 +45,14 @@ pub const Chunk = struct {
     code: std.ArrayList(u8),
     constants: value.ValueArray,
     lines: std.ArrayList(CodeLine),
+    names: std.ArrayList([]const u8),
 
     pub fn init(allocator: std.mem.Allocator) Chunk {
         return .{
             .code = std.ArrayList(u8).init(allocator),
             .constants = value.ValueArray.init(allocator),
             .lines = std.ArrayList(CodeLine).init(allocator),
+            .names = std.ArrayList([]const u8).init(allocator),
         };
     }
 
@@ -58,6 +60,7 @@ pub const Chunk = struct {
         self.code.deinit();
         self.constants.deinit();
         self.lines.deinit();
+        self.names.deinit();
     }
 
     pub fn writeByte(self: *Self, byte: u8) !void {
@@ -93,6 +96,10 @@ pub const Chunk = struct {
     pub fn writeConstant(self: *Self, val: value.Value, line: u24) !void {
         const index = try self.makeConstant(val);
         try self.writeMaybeLongArg(index, line, .Constant, .ConstantLong);
+    }
+
+    pub fn defineName(self: *Self, name: []u8) !void {
+        try self.names.append(name);
     }
 
     pub fn defineVariable(self: *Self, index: u24, line: u24) !void {
