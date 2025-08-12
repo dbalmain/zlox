@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2025-08-12
+
+### Added
+- Chapter 21 Exercises 1-2: Variable name optimization and runtime redeclaration checking
+- Separate variable name storage using `names` array in chunk for memory efficiency
+- Variable name deduplication using `HashMap<String, u24>` for O(1) lookups
+- Runtime redeclaration checking with proper error messages for `var a; var a;`
+- Enhanced debug output with separate variable instruction handlers showing variable names
+
+### Changed
+- Variable operations now use dedicated indices instead of constant table indices
+- Global variable storage changed from `StringArrayHashMap(Value)` to `AutoHashMap(u24, Value)`
+- Compiler `makeIdentifier()` function replaces `identifierConstant()` for variable name management
+- Debug disassembler split variable and constant instruction handling for clarity
+- VM variable methods (`defineGlobalVar`, `setGlobalVar`, `getGlobalVar`) now work with indices
+
+### Performance Improvements
+- Reduced constant table usage by moving variable names to separate storage
+- O(1) variable name deduplication prevents repeated entries
+- Smaller bytecode with dedicated variable indexing
+- Better cache locality with separate variable name array
+- Freed constant table slots for actual program constants
+
+### Technical Details
+- Variable names stored in `Chunk.names: ArrayList([]const u8)` for direct indexing
+- Compiler maintains `HashMap<String, u24>` for compile-time name deduplication
+- Debug output correctly displays variable names for all variable operations
+- Runtime redeclaration detection provides clear error messages with variable names
+- Clean separation between constants (values) and variable names (identifiers)
+
 ## [0.21.0] - 2025-08-12
 
 ### Added
@@ -35,15 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Global variable operations extracted into clean helper methods in VM: defineGlobalVar(), setGlobalVar(), getGlobalVar()
 - Assignment validation integrated into expression parsing with precedence-aware checking
 - Error recovery system with synchronization at statement boundaries
-
-### Technical Excellence
-- **Architectural Decision**: Storing `can_assign` as compiler state demonstrates superior design over parameter threading
-- **Professional Quality**: Architecture aligns with modern compiler design patterns (Rust, Swift, modern C++)
-- **Assignment Validation**: Sophisticated prevention of invalid assignment targets with clear error messages
-- **Integration Quality**: Perfect integration with existing string interning and object systems
-- **Scalable Pattern**: State management approach scales naturally for future language features (local scopes, classes)
-- **Memory Management**: Sound memory handling with proper cleanup patterns throughout variable lifecycle
-- **Error Handling**: Comprehensive error detection, recovery, and reporting at all levels
 
 ### Performance Characteristics
 - **Global Storage**: O(1) average case variable lookup using StringArrayHashMap
@@ -90,16 +111,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heap management enhanced with `std.StringHashMap(*Obj) interned_strings` field
 - String memory management optimized with smart allocation and cleanup patterns
 - Compiler integration maintains seamless operation with new interning system
-
-### Technical Excellence
-- **Architectural Decision**: Used proven `std.StringHashMap` instead of implementing from scratch
-- **Memory Management**: Perfect integration with existing heap and object lifecycle
-- **Performance Characteristics**: 
-  - Space complexity: O(unique_strings) vs O(total_strings) before
-  - Time complexity: O(1) average for string operations and equality
-  - Memory locality: Better cache performance due to shared string instances
-- **Integration Quality**: Non-breaking changes maintain full backward compatibility
-- **Extensibility**: Foundation ready for interning other object types
 
 ### Expert Review Results
 - **A Rating**: Outstanding implementation with production-ready quality

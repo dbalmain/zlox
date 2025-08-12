@@ -4,7 +4,10 @@
       "Bash(zig build:*)",
       "Bash(find:*)",
       "Bash(ls:*)",
-      "WebFetch(domain:craftinginterpreters.com)"
+      "WebFetch(domain:craftinginterpreters.com)",
+      "Bash(cat:*)",
+      "Bash(./zig-out/bin/zlox:*)",
+      "Bash(git tag:*)"
     ],
     "deny": []
   }

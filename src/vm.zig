@@ -27,7 +27,7 @@ pub const VM = struct {
     chunk: *const chunk.Chunk,
     ip: [*]u8,
     stack: std.ArrayList(value.Value),
-    globals: std.StringArrayHashMap(value.Value),
+    globals: std.AutoHashMap(u24, value.Value),
     heap: *object.Heap,
 
     pub fn init(heap: *object.Heap, chk: *const chunk.Chunk) Self {
@@ -36,7 +36,7 @@ pub const VM = struct {
             .chunk = chk,
             .ip = undefined,
             .stack = std.ArrayList(value.Value).init(heap.allocator),
-            .globals = std.StringArrayHashMap(value.Value).init(heap.allocator),
+            .globals = std.AutoHashMap(u24, value.Value).init(heap.allocator),
         };
         return vm;
     }
@@ -65,12 +65,12 @@ pub const VM = struct {
             switch (instruction) {
                 .Constant => try self.push(self.readConstant()),
                 .ConstantLong => try self.push(self.readLongConstant()),
-                .DefineGlobal => try self.defineGlobalVar(self.readConstant().asStringChars()),
-                .DefineGlobalLong => try self.defineGlobalVar(self.readLongConstant().asStringChars()),
-                .SetGlobal => try self.setGlobalVar(self.readConstant().asStringChars()),
-                .SetGlobalLong => try self.setGlobalVar(self.readLongConstant().asStringChars()),
-                .GetGlobal => try self.getGlobalVar(self.readConstant().asStringChars()),
-                .GetGlobalLong => try self.getGlobalVar(self.readLongConstant().asStringChars()),
+                .DefineGlobal => try self.defineGlobalVar(self.readByte()),
+                .DefineGlobalLong => try self.defineGlobalVar(self.readU24()),
+                .SetGlobal => try self.setGlobalVar(self.readByte()),
+                .SetGlobalLong => try self.setGlobalVar(self.readU24()),
+                .GetGlobal => try self.getGlobalVar(self.readByte()),
+                .GetGlobalLong => try self.getGlobalVar(self.readU24()),
                 .Nil => try self.push(value.nil_val),
                 .True => try self.push(value.true_val),
                 .False => try self.push(value.false_val),
@@ -175,30 +175,38 @@ pub const VM = struct {
         return self.chunk.constants.values.items[self.readByte()];
     }
 
-    fn readLongConstant(self: *Self) value.Value {
-        const index = @as(u24, self.readByte()) |
+    fn readU24(self: *Self) u24 {
+        return @as(u24, self.readByte()) |
             @as(u24, self.readByte()) << 8 |
             @as(u24, self.readByte()) << 16;
+    }
+
+    fn readLongConstant(self: *Self) value.Value {
+        const index = self.readU24();
         return self.chunk.constants.values.items[index];
     }
 
-    fn defineGlobalVar(self: *Self, name: []const u8) !void {
+    fn defineGlobalVar(self: *Self, index: u24) !void {
+        // Check for redeclaration
+        if (self.globals.contains(index)) {
+            return runtimeError("Variable '{s}' already declared.", .{self.chunk.names.items[index]});
+        }
         // don't pop before adding the value to the table to prevent garbage collection
-        try self.globals.put(name, self.peek(0).*);
+        try self.globals.put(index, self.peek(0).*);
         _ = try self.pop();
     }
 
-    fn setGlobalVar(self: *Self, name: []const u8) !void {
-        const previous = try self.globals.fetchPut(name, self.peek(0).*);
+    fn setGlobalVar(self: *Self, index: u24) !void {
+        const previous = try self.globals.fetchPut(index, self.peek(0).*);
         if (previous == null) {
-            _ = self.globals.swapRemove(name);
-            return runtimeError("undefined variable '{s}'.", .{name});
+            _ = self.globals.remove(index);
+            return runtimeError("undefined variable '{s}'.", .{self.chunk.names.items[index]});
         }
     }
 
-    fn getGlobalVar(self: *Self, name: []const u8) !void {
-        try self.push(self.globals.get(name) orelse
-            return runtimeError("undefined variable '{s}'.", .{name}));
+    fn getGlobalVar(self: *Self, index: u24) !void {
+        try self.push(self.globals.get(index) orelse
+            return runtimeError("undefined variable '{s}'.", .{self.chunk.names.items[index]}));
     }
 };
 

@@ -6,17 +6,19 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 21**: Global Variables - ✅ Complete
+- **Chapter 21**: Global Variables - ✅ Complete (with Exercises 1-2)
   - Complete statement system with declaration, assignment, and print statements
-  - Global variable storage using efficient `StringArrayHashMap` in VM
+  - Optimized variable storage with dedicated indexing system and name deduplication
   - Variable declarations with `var name = value;` and `var name;` (defaults to nil)
   - Variable assignment with `variable = value` and proper validation
   - Variable access with identifier resolution and undefined variable detection
   - Expression statements with automatic result disposal using Pop instruction
   - Print statements with `print expression;` syntax
   - Advanced assignment validation preventing invalid targets like `1 + 2 = 3`
+  - Runtime redeclaration checking with clear error messages
   - Sophisticated error handling with panic mode and synchronization recovery
   - Clean compiler architecture using state management instead of parameter threading
+  - Performance optimizations: O(1) variable name lookups and reduced memory usage
 
 ## Building and Running
 
