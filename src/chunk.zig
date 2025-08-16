@@ -10,6 +10,8 @@ pub const OpCode = enum(u8) {
     GetGlobalLong,
     SetGlobal,
     SetGlobalLong,
+    SetLocal,
+    GetLocal,
     Nil,
     True,
     False,

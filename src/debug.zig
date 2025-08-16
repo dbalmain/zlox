@@ -31,8 +31,17 @@ pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?us
     switch (instruction) {
         .Constant => return constantInstruction(self, offset, instruction),
         .ConstantLong => return constantLongInstruction(self, offset, instruction),
-        .DefineGlobal, .SetGlobal, .GetGlobal => return variableInstruction(self, offset, instruction),
-        .DefineGlobalLong, .SetGlobalLong, .GetGlobalLong => return variableLongInstruction(self, offset, instruction),
+        .DefineGlobal,
+        .SetGlobal,
+        .GetGlobal,
+        => return globalVariableInstruction(self, offset, instruction),
+        .SetLocal,
+        .GetLocal,
+        => return variableInstruction(self, offset, instruction),
+        .DefineGlobalLong,
+        .SetGlobalLong,
+        .GetGlobalLong,
+        => return globalVariableLongInstruction(self, offset, instruction),
         else => return simpleInstruction(instruction, offset),
     }
 }
@@ -62,11 +71,17 @@ fn constantLongInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.
 
 fn variableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
     const index = self.code.items[offset + 1];
+    std.debug.print("{s:<18} {d:>4}\n", .{ @tagName(code), index });
+    return offset + 2;
+}
+
+fn globalVariableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
+    const index = self.code.items[offset + 1];
     std.debug.print("{s:<18} {d:>4} '{s}'\n", .{ @tagName(code), index, self.names.items[index] });
     return offset + 2;
 }
 
-fn variableLongInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
+fn globalVariableLongInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
     const index = @as(u24, self.code.items[offset + 1]) |
         (@as(u24, self.code.items[offset + 2]) << 8) |
         (@as(u24, self.code.items[offset + 3]) << 16);

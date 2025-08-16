@@ -71,6 +71,8 @@ pub const VM = struct {
                 .SetGlobalLong => try self.setGlobalVar(self.readU24()),
                 .GetGlobal => try self.getGlobalVar(self.readByte()),
                 .GetGlobalLong => try self.getGlobalVar(self.readU24()),
+                .GetLocal => try self.push(self.stack.items[self.readByte()]),
+                .SetLocal => self.stack.items[self.readByte()] = self.peek(0).*,
                 .Nil => try self.push(value.nil_val),
                 .True => try self.push(value.true_val),
                 .False => try self.push(value.false_val),
@@ -200,13 +202,13 @@ pub const VM = struct {
         const previous = try self.globals.fetchPut(index, self.peek(0).*);
         if (previous == null) {
             _ = self.globals.remove(index);
-            return runtimeError("undefined variable '{s}'.", .{self.chunk.names.items[index]});
+            return runtimeError("Undefined variable '{s}'.", .{self.chunk.names.items[index]});
         }
     }
 
     fn getGlobalVar(self: *Self, index: u24) !void {
         try self.push(self.globals.get(index) orelse
-            return runtimeError("undefined variable '{s}'.", .{self.chunk.names.items[index]}));
+            return runtimeError("Undefined variable '{s}'.", .{self.chunk.names.items[index]}));
     }
 };
 

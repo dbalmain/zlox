@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2025-08-16
+
+### Added
+- Chapter 22 - Local Variables implementation with complete block scoping system
+- Block statement support with `{` and `}` syntax for nested scope management
+- Stack-based local variable storage with O(1) access via direct indexing
+- Local variable lifecycle management with proper initialization and cleanup
+- Scope depth tracking for nested scopes with variable shadowing support
+- Two-tier variable resolution system (locals first, then globals fallback)
+- New OpCodes for local variable operations:
+  - `GetLocal`: Direct stack access for local variable retrieval with O(1) performance
+  - `SetLocal`: Direct stack assignment for local variable modification with O(1) performance
+- Local variable compiler infrastructure:
+  - `Local` struct with `name_index: u24` and `depth: i8` for efficient storage
+  - Fixed array storage `locals: [LOCAL_MAX]Local` for 256 maximum locals per scope
+  - `beginScope()` and `endScope()` functions for proper scope lifecycle management
+  - `declareVariable()` with compile-time redeclaration checking in same scope
+  - `resolveLocal()` for local variable lookup with O(d) complexity (d = locals in scope)
+- Advanced error handling and safety features:
+  - "Can't redeclare local variable." error for same-scope conflicts
+  - "Can't read local variable in its own initialiser." for self-reference detection (e.g., `var a = a;`)
+  - "Too many local variables in function" capacity limit enforcement (256 max)
+  - Proper variable shadowing allowing same names in different scopes
+
+### Changed
+- Variable resolution enhanced with sophisticated two-tier lookup system
+- Compiler variable handling split between local and global paths for optimal performance
+- Local variable access bypasses expensive HashMap operations in favor of direct stack indexing
+- Scope management integrated throughout compiler with automatic cleanup on scope exit
+- Debug output enhanced to distinguish local vs global variable instructions
+- Error messages improved with context-aware reporting for local vs global variables
+- VM variable operations optimized with direct stack access for locals
+
+### Performance Characteristics
+- **Local Variable Access**: O(1) direct stack indexing vs O(log n) global HashMap lookup
+- **Variable Resolution**: O(d) where d = number of locals in current scope (typically very small)
+- **Memory Efficiency**: Fixed array allocation provides cache-friendly access patterns
+- **Scope Operations**: O(1) scope entry, O(n) scope exit where n = locals to clean up
+- **Significant Performance Improvement**: Local variables dramatically faster than globals
+
+### Technical Implementation Details
+- **Stack-Based Storage**: Local variables stored directly on VM stack for maximum efficiency
+- **Scope Depth Tracking**: 7-bit scope depth (`scope_depth: u7`) supports 127 nested levels
+- **Fixed Array Design**: `locals: [LOCAL_MAX]Local` provides predictable performance characteristics
+- **String Interning Integration**: Reuses existing `names` HashMap for variable name storage efficiency
+- **Self-Reference Detection**: Compile-time analysis prevents `var a = a;` initialization patterns
+- **Proper Variable Lifecycle**: Variables marked uninitialized during declaration, initialized after assignment
+- **Seamless Global Fallback**: Local resolution failure automatically falls back to existing global system
+
+### Integration Quality
+- **Backward Compatibility**: All existing global variable functionality preserved
+- **Clean Architecture**: Local variables integrate without disrupting existing systems
+- **Consistent Error Handling**: Unified error reporting across local and global contexts
+- **Debug Support**: Enhanced disassembler correctly handles local vs global variable instructions
+
+### Testing Verification
+- Block scoping: `{ var a = 1; { var a = 2; print a; } print a; }` prints `2` then `1`
+- Variable shadowing: Local variables properly shadow globals with same names
+- Scope cleanup: Variables automatically removed when leaving blocks
+- Error detection: Redeclaration and self-reference errors caught at compile time
+- Performance: Measurable speed improvements for local variable operations
+- Complex nesting: Multiple nested scopes work correctly with proper variable resolution
+- Mixed operations: Local and global variables coexist seamlessly in same program
+
 ## [0.21.1] - 2025-08-12
 
 ### Added

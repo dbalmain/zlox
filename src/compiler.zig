@@ -6,6 +6,8 @@ const object = @import("object.zig");
 const debug = @import("debug.zig");
 const config = @import("config");
 
+const LOCAL_MAX = 256;
+
 const Precedence = enum {
     None,
     Assignment, // =
@@ -104,6 +106,18 @@ const Parser = struct {
     }
 };
 
+const Local = struct {
+    name_index: u24,
+    depth: i8,
+
+    fn init(name_index: u24) Local {
+        return Local{
+            .name_index = name_index,
+            .depth = -1,
+        };
+    }
+};
+
 const Compiler = struct {
     const Self = @This();
     heap: *object.Heap,
@@ -114,6 +128,9 @@ const Compiler = struct {
     panic_mode: bool,
     err: ?CompileError,
     names: std.StringHashMap(u24),
+    locals: [LOCAL_MAX]Local,
+    local_top: u9,
+    scope_depth: u7,
 
     fn init(heap: *object.Heap, source: []const u8, chk: *chunk.Chunk) Self {
         return Compiler{
@@ -125,6 +142,9 @@ const Compiler = struct {
             .err = null,
             .panic_mode = false,
             .names = std.StringHashMap(u24).init(heap.allocator),
+            .locals = undefined,
+            .local_top = 0,
+            .scope_depth = 0,
         };
     }
 
@@ -247,7 +267,7 @@ const Compiler = struct {
         self.errorAt(&self.parser.previous, message);
     }
 
-    fn synchronize(self: *Self) void {
+    fn synchronise(self: *Self) void {
         self.panic_mode = false;
         while (self.parser.current.type != .Eof) {
             if (self.parser.previous.type == .Semicolon) return;
@@ -267,7 +287,7 @@ const Compiler = struct {
         } else {
             try self.statement();
         }
-        if (self.panic_mode) self.synchronize();
+        if (self.panic_mode) self.synchronise();
     }
 
     fn varDeclaration(self: *Self) CompileError!void {
@@ -284,21 +304,90 @@ const Compiler = struct {
     }
 
     fn defineVariable(self: *Self, index: u24) CompileError!void {
+        if (self.scope_depth > 0) {
+            self.markInitialised();
+            return;
+        }
         self.chunk.defineVariable(index, self.parser.previous.line) catch
             return CompileError.OutOfMemory;
+    }
+
+    fn markInitialised(self: *Self) void {
+        self.locals[self.local_top - 1].depth = self.scope_depth;
     }
 
     fn statement(self: *Self) CompileError!void {
         if (self.match(.Print)) {
             try self.printStatement();
+        } else if (self.match(.LeftBrace)) {
+            self.beginScope();
+            try self.block();
+            try self.endScope();
         } else {
             try self.expressionStatement();
         }
     }
 
+    fn block(self: *Self) CompileError!void {
+        while (!self.check(.RightBrace) and !self.check(.Eof)) {
+            try self.declaration();
+        }
+
+        self.consume(.RightBrace, "Expect '}' after block.");
+    }
+
+    fn beginScope(self: *Self) void {
+        self.scope_depth += 1;
+    }
+
+    fn endScope(self: *Self) CompileError!void {
+        self.scope_depth -= 1;
+        while (self.local_top > 0 and self.locals[self.local_top - 1].depth > self.scope_depth) {
+            try self.emitCode(.Pop);
+            self.local_top -= 1;
+        }
+    }
+
     fn parseVariable(self: *Self, error_message: []const u8) CompileError!u24 {
         self.consume(.Identifier, error_message);
-        return self.makeIdentifier(&self.parser.previous);
+        const name_index = try self.makeIdentifier(&self.parser.previous);
+        if (self.scope_depth > 0) {
+            self.declareVariable(name_index);
+        }
+        return name_index;
+    }
+
+    fn declareVariable(self: *Self, name_index: u24) void {
+        if (self.local_top == LOCAL_MAX) {
+            self.compileError("Too many local variables in function");
+            return;
+        }
+        var i = self.local_top;
+        while (i > 0) {
+            i -= 1;
+            const local = self.locals[i];
+            if (local.depth != -1 and local.depth < self.scope_depth) break;
+            if (local.name_index == name_index) {
+                self.compileError("Can't redeclare local variable.");
+            }
+        }
+        self.locals[self.local_top] = Local.init(name_index);
+        self.local_top += 1;
+    }
+
+    fn resolveLocal(self: *Self, name_index: u24) ?u8 {
+        var i = self.local_top;
+        while (i > 0) {
+            i -= 1;
+            const local = self.locals[i];
+            if (local.name_index == name_index) {
+                if (local.depth == -1) {
+                    self.compileError("Can't read local variable in its own initialiser.");
+                }
+                return @intCast(i);
+            }
+        }
+        return null;
     }
 
     fn makeIdentifier(self: *Self, name_token: *scanner.Token) CompileError!u24 {
@@ -315,11 +404,20 @@ const Compiler = struct {
 
     fn namedVariable(self: *Self, name: *scanner.Token) CompileError!void {
         const index = try self.makeIdentifier(name);
+        const local_index = self.resolveLocal(index);
         if (self.can_assign and self.match(.Equal)) {
             try expression(self);
-            try self.setGlobal(index);
+            if (local_index) |i| {
+                try self.emitCodeAndByte(.SetLocal, i);
+            } else {
+                try self.setGlobal(index);
+            }
         } else {
-            try self.getGlobal(index);
+            if (local_index) |i| {
+                try self.emitCodeAndByte(.GetLocal, i);
+            } else {
+                try self.getGlobal(index);
+            }
         }
     }
 
