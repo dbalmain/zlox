@@ -17,6 +17,7 @@ pub const OpCode = enum(u8) {
     False,
     Pop,
     Equal,
+    Matches,
     Greater,
     Less,
     Add,
@@ -37,6 +38,7 @@ pub const OpCode = enum(u8) {
     JumpIfFalse,
     Or,
     And,
+    Break,
     Return,
 };
 

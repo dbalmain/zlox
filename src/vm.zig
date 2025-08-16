@@ -95,6 +95,7 @@ pub const VM = struct {
                 } else return runtimeError("Operand must be a number", .{}),
                 .Not => try self.push(value.asBoolean((try self.pop()).isFalsey())),
                 .Equal => try self.push(value.asBoolean((try self.pop()).equals(&try self.pop()))),
+                .Matches => try self.push(value.asBoolean((try self.pop()).equals(self.peek(0)))),
                 .Print => {
                     (try self.pop()).print();
                     std.debug.print("\n", .{});
@@ -121,6 +122,12 @@ pub const VM = struct {
                 .Loop => {
                     const offset = self.readShort();
                     self.ip -= offset;
+                },
+                .Break => {
+                    const break_offset = self.readShort();
+                    self.ip -= break_offset;
+                    const offset = self.readShort();
+                    self.ip += offset;
                 },
                 .Return => return,
                 .Class => {},

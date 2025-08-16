@@ -51,6 +51,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .Dot => ParseRule.init(null, null, .None),
         .Minus => ParseRule.init(unary, binary, .Term),
         .Plus => ParseRule.init(null, binary, .Term),
+        .Colon => ParseRule.init(null, null, .None),
         .Semicolon => ParseRule.init(null, null, .None),
         .Slash => ParseRule.init(null, binary, .Factor),
         .Star => ParseRule.init(null, binary, .Factor),
@@ -66,7 +67,11 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .String => ParseRule.init(string, null, .None),
         .Number => ParseRule.init(number, null, .None),
         .And => ParseRule.init(null, and_, .And),
+        .Break => ParseRule.init(null, null, .None),
+        .Case => ParseRule.init(null, null, .None),
         .Class => ParseRule.init(null, null, .None),
+        .Continue => ParseRule.init(null, null, .None),
+        .Default => ParseRule.init(null, null, .None),
         .Else => ParseRule.init(null, null, .None),
         .False => ParseRule.init(literal, null, .None),
         .For => ParseRule.init(null, null, .None),
@@ -77,6 +82,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .Print => ParseRule.init(null, null, .None),
         .Return => ParseRule.init(null, null, .None),
         .Super => ParseRule.init(null, null, .None),
+        .Switch => ParseRule.init(null, null, .None),
         .This => ParseRule.init(null, null, .None),
         .True => ParseRule.init(literal, null, .None),
         .Var => ParseRule.init(null, null, .None),
@@ -132,6 +138,7 @@ const Compiler = struct {
     local_top: u9,
     scope_depth: u7,
     loop_start: ?usize,
+    break_address: ?usize,
 
     fn init(heap: *object.Heap, source: []const u8, chk: *chunk.Chunk) Self {
         return Compiler{
@@ -147,6 +154,7 @@ const Compiler = struct {
             .local_top = 0,
             .scope_depth = 0,
             .loop_start = null,
+            .break_address = null,
         };
     }
 
@@ -274,7 +282,20 @@ const Compiler = struct {
         while (self.parser.current.type != .Eof) {
             if (self.parser.previous.type == .Semicolon) return;
             switch (self.parser.current.type) {
-                .Class, .Fun, .Var, .For, .If, .While, .Print, .Return => return,
+                .Class,
+                .Fun,
+                .Var,
+                .For,
+                .If,
+                .While,
+                .Print,
+                .Return,
+                .Continue,
+                .Break,
+                .Switch,
+                .Case,
+                .Default,
+                => return,
                 else => {},
             }
 
@@ -327,6 +348,12 @@ const Compiler = struct {
             try self.whileStatement();
         } else if (self.match(.For)) {
             try self.forStatement();
+        } else if (self.match(.Continue)) {
+            try self.continueStatement();
+        } else if (self.match(.Break)) {
+            try self.breakStatement();
+        } else if (self.match(.Switch)) {
+            try self.switchStatement();
         } else if (self.match(.LeftBrace)) {
             self.beginScope();
             try self.block();
@@ -360,10 +387,13 @@ const Compiler = struct {
         try self.expression();
         self.consume(.RightParen, "Expect ')' after 'while' condition.");
         const exit_jump = try self.emitJump(.JumpIfFalse);
+        const previous_break_address = self.break_address;
+        self.break_address = exit_jump;
         try self.statement();
         try self.emitLoop(loop_start);
         try self.patchJump(exit_jump);
         self.loop_start = previous_loop_start;
+        self.break_address = previous_break_address;
     }
 
     fn forStatement(self: *Self) CompileError!void {
@@ -378,10 +408,12 @@ const Compiler = struct {
         }
         var loop_start = self.currentOffset();
         var exit_jump: ?usize = null;
+        const previous_break_address = self.break_address;
         if (!self.match(.Semicolon)) {
             try self.expression();
             self.consume(.Semicolon, "Expect ';' after 'for' condition.");
             exit_jump = try self.emitJump(.JumpIfFalse);
+            self.break_address = exit_jump;
         }
         if (!self.match(.RightParen)) {
             const increment_jump = try self.emitJump(.Jump);
@@ -400,9 +432,57 @@ const Compiler = struct {
         try self.emitLoop(loop_start);
         if (exit_jump) |offset| {
             try self.patchJump(offset);
+            self.break_address = previous_break_address;
         }
         try self.endScope();
         self.loop_start = previous_loop_start;
+    }
+
+    fn switchStatement(self: *Self) CompileError!void {
+        self.consume(.LeftParen, "Expect '(' after 'switch'.");
+        try self.expression();
+        self.consume(.RightParen, "Expect ')' after 'switch'-on expression.");
+        self.consume(.LeftBrace, "Expect '{' after 'switch'-on expression closing ')'.");
+        var case_jump = try self.emitJump(.Jump);
+        const break_address = self.currentOffset();
+        const break_jump = try self.emitJump(.Jump);
+
+        while (self.match(.Case)) {
+            try self.patchJump(case_jump);
+            try self.expression();
+            self.consume(.Colon, "Expect ':' after switch 'case' expression.");
+            try self.emitCode(.Matches);
+            case_jump = try self.emitJump(.JumpIfFalse);
+            try self.statement();
+            try self.emitLoop(break_address);
+        }
+        try self.patchJump(case_jump);
+        if (self.match(.Default)) {
+            self.consume(.Colon, "Expect ':' after switch 'default'.");
+            try self.statement();
+        }
+        try self.patchJump(break_jump);
+        // pop switch-on value
+        try self.emitCode(.Pop);
+        self.consume(.RightBrace, "Expect '}' to close switch statement.");
+    }
+
+    fn continueStatement(self: *Self) CompileError!void {
+        if (self.loop_start) |loop_start| {
+            self.consume(.Semicolon, "Expect ';' after 'continue'.");
+            try self.emitLoop(loop_start);
+        } else {
+            self.compileError("Cannot use 'continue' outside of a loop.");
+        }
+    }
+
+    fn breakStatement(self: *Self) CompileError!void {
+        if (self.break_address) |break_address| {
+            self.consume(.Semicolon, "Expect ';' after 'break'.");
+            try self.emitBreak(break_address);
+        } else {
+            self.compileError("Cannot use 'break' outside of a loop.");
+        }
     }
 
     fn currentOffset(self: *Self) usize {
@@ -422,12 +502,22 @@ const Compiler = struct {
     /// Emits a backward jump instruction for loops with 16-bit distance encoding.
     /// Jump distance limited to 65,535 bytes (64KB). Large loop bodies may exceed
     /// this limit, particularly in complex nested structures or very long functions.
-    fn emitLoop(self: *Self, loopStart: usize) CompileError!void {
-        const jump = self.chunk.code.items.len - loopStart + 3;
+    fn emitLoop(self: *Self, loop_start: usize) CompileError!void {
+        const jump = self.chunk.code.items.len - loop_start + 3;
         if (jump > std.math.maxInt(u16)) {
             self.compileError("Too much code to jump over");
         }
         try self.emitCode(.Loop);
+        try self.emitByte(@intCast(jump >> 8));
+        try self.emitByte(@intCast(jump));
+    }
+
+    fn emitBreak(self: *Self, break_address: usize) CompileError!void {
+        const jump = self.chunk.code.items.len - break_address + 3;
+        if (jump > std.math.maxInt(u16)) {
+            self.compileError("Too much code to jump over");
+        }
+        try self.emitCode(.Break);
         try self.emitByte(@intCast(jump >> 8));
         try self.emitByte(@intCast(jump));
     }

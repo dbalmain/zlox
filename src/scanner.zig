@@ -6,6 +6,7 @@ pub const TokenType = enum {
     RightParen,
     LeftBrace,
     RightBrace,
+    Colon,
     Comma,
     Dot,
     Minus,
@@ -28,7 +29,11 @@ pub const TokenType = enum {
     Number,
     // Keywords.
     And,
+    Break,
+    Case,
     Class,
+    Continue,
+    Default,
     Else,
     False,
     For,
@@ -39,6 +44,7 @@ pub const TokenType = enum {
     Print,
     Return,
     Super,
+    Switch,
     This,
     True,
     Var,
@@ -83,6 +89,7 @@ pub const Scanner = struct {
             ')' => self.makeToken(.RightParen),
             '{' => self.makeToken(.LeftBrace),
             '}' => self.makeToken(.RightBrace),
+            ':' => self.makeToken(.Colon),
             ';' => self.makeToken(.Semicolon),
             ',' => self.makeToken(.Comma),
             '.' => self.makeToken(.Dot),
@@ -198,7 +205,14 @@ pub const Scanner = struct {
     fn identifierType(self: *Self) TokenType {
         return switch (self.start[0]) {
             'a' => self.checkKeyword(1, 3, "nd", .And),
-            'c' => self.checkKeyword(1, 5, "lass", .Class),
+            'b' => self.checkKeyword(1, 5, "reak", .Break),
+            'c' => if (self.current - self.start > 1) switch (self.start[1]) {
+                'a' => self.checkKeyword(2, 4, "se", .Case),
+                'l' => self.checkKeyword(2, 5, "ass", .Class),
+                'o' => self.checkKeyword(2, 8, "ntinue", .Continue),
+                else => .Identifier,
+            } else .Identifier,
+            'd' => self.checkKeyword(1, 7, "efault", .Default),
             'e' => self.checkKeyword(1, 4, "lse", .Else),
             'f' => if (self.current - self.start > 1) switch (self.start[1]) {
                 'a' => self.checkKeyword(2, 5, "lse", .False),
@@ -211,7 +225,11 @@ pub const Scanner = struct {
             'o' => self.checkKeyword(1, 2, "r", .Or),
             'p' => self.checkKeyword(1, 5, "rint", .Print),
             'r' => self.checkKeyword(1, 6, "eturn", .Return),
-            's' => self.checkKeyword(1, 5, "uper", .Super),
+            's' => if (self.current - self.start > 1) switch (self.start[1]) {
+                'u' => self.checkKeyword(2, 5, "per", .Super),
+                'w' => self.checkKeyword(2, 6, "itch", .Switch),
+                else => .Identifier,
+            } else .Identifier,
             't' => if (self.current - self.start > 1) switch (self.start[1]) {
                 'h' => self.checkKeyword(2, 4, "is", .This),
                 'r' => self.checkKeyword(2, 4, "ue", .True),

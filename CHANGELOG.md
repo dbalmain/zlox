@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2025-08-16
+
+### Added
+- Chapter 23 Exercises Implementation: Advanced Control Flow Statements
+- **Continue Statement** with comprehensive loop context management:
+  - Compile-time validation preventing continue outside loops with clear error messages
+  - Loop context tracking via `loop_start` field for precise jump targeting
+  - Nested loop support with proper save/restore of loop context across scopes
+  - VM integration reusing existing `Loop` opcode for efficient continue execution
+- **Break Statement** with innovative two-jump VM architecture:
+  - Advanced break address tracking using `break_address` field for loop exit points
+  - Two-jump VM implementation: backward jump to break target + forward jump for unified exit
+  - Nested loop support with proper break address save/restore for complex scenarios
+  - Efficient break execution avoiding complex stack unwinding or special opcodes
+- **Switch Statement** with sophisticated sequential case matching:
+  - Jump chaining pattern for case evaluation with first-match-wins semantics
+  - Dynamic case expressions supporting runtime evaluation (e.g., `case 1 + 1:`)
+  - Type-safe matching using existing value equality system across all Lox types
+  - No fall-through design: each case execution jumps to cleanup preventing accidental falls
+  - Default case support with optional default handling and proper control flow
+- **New Language Keywords**: `break`, `case`, `continue`, `default`, `switch` with scanner integration
+- **New Token Type**: `:` colon token for case and default labels
+- **New Bytecode Instructions**:
+  - `Break`: Break statement execution using two-jump pattern for efficient exit
+  - `Matches`: Switch case comparison preserving switch-on value during evaluation
+
+### Technical Implementation Highlights
+- **Advanced Loop Context Management**:
+  - `loop_start` field tracks current loop position for continue jump targeting
+  - Proper context save/restore enables correct nested loop behavior
+  - Compile-time validation prevents continue/break usage outside loop contexts
+- **Innovative Break Architecture**:
+  - Two-jump VM pattern: backward jump to break address + forward jump for exit
+  - `break_address` field manages loop exit points with nested loop support
+  - Eliminates need for complex stack unwinding or special break opcodes
+- **Sophisticated Switch Implementation**:
+  - Sequential case testing with conditional jump chaining for first-match semantics
+  - Switch-on value preserved on stack throughout case evaluation process
+  - Dynamic case expressions evaluated at runtime enabling computed case values
+  - Jump chaining pattern ensures optimal execution path through case structure
+- **Scanner Enhancements**:
+  - Trie-based keyword recognition extended with break, case, continue, default, switch
+  - Colon token (`:`) added for case/default label syntax support
+  - Seamless integration with existing tokenization infrastructure
+
+### Advanced Control Flow Features
+- **Continue Statement Execution**:
+  - Reuses existing `Loop` opcode infrastructure for O(1) jump performance
+  - Proper interaction with local variable scoping and cleanup
+  - Works correctly with while loops, for loops, and nested scenarios
+- **Break Statement Execution**:
+  - Two-jump pattern provides O(1) break execution with minimal VM overhead
+  - Targets immediate enclosing loop correctly in nested scenarios
+  - Clean integration with existing variable scoping system
+- **Switch Statement Execution**:
+  - O(n) sequential case matching optimal for typical switch statement sizes
+  - Type-safe case comparison supporting all Lox value types (nil, boolean, number, string)
+  - First-match-wins semantics prevent fall-through while enabling computed cases
+  - Efficient stack management preserving switch-on value throughout evaluation
+
+### Integration Quality
+- **Seamless Integration**: Perfect compatibility with existing control flow (if/else, while, for)
+- **Variable Scoping**: Proper interaction with local variable system and scope management
+- **Error Handling**: Comprehensive compile-time validation with clear error messages
+- **Debug Support**: Enhanced disassembler with proper instruction display for new opcodes
+- **Backward Compatibility**: All existing functionality preserved with enhanced control capabilities
+
+### Performance Characteristics
+- **Continue**: O(1) jump to loop start using existing Loop instruction infrastructure
+- **Break**: O(1) two-jump execution with minimal VM overhead and stack impact
+- **Switch**: O(n) sequential case matching with optimal performance for typical use cases
+- **Memory Efficiency**: Minimal bytecode overhead with efficient stack usage patterns
+- **Context Management**: Efficient save/restore operations for nested loop scenarios
+
+### Files Modified
+- `src/scanner.zig`: Extended keyword recognition and added colon token support
+- `src/chunk.zig`: New opcodes (Break, Matches) with proper instruction encoding
+- `src/compiler.zig`: Advanced statement parsing and sophisticated jump management
+- `src/vm.zig`: Two-jump break execution and switch case comparison logic
+- `src/debug.zig`: Enhanced disassembler support for new instruction types
+
+### Testing Verification
+- Continue statements: `while (true) { print "loop"; continue; print "never"; }` works correctly
+- Break statements: `while (true) { print "once"; break; print "never"; }` exits properly
+- Nested scenarios: Continue and break target correct loop in nested structures
+- Switch statements: `switch (value) { case 1: print "one"; case 2: print "two"; default: print "other"; }` executes correctly
+- Dynamic cases: `switch (x) { case 1 + 1: print "computed"; }` evaluates case expressions at runtime
+- Error handling: Continue/break outside loops produce clear compile-time errors
+- Complex integration: All new features work seamlessly with existing control flow and variables
+
 ## [0.23.0] - 2025-08-16
 
 ### Added

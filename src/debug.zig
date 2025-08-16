@@ -42,6 +42,7 @@ pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?us
         .SetGlobalLong,
         .GetGlobalLong,
         => return globalVariableLongInstruction(self, offset, instruction),
+        .Break,
         .Loop,
         .Jump,
         .JumpIfFalse,
