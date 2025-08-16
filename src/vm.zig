@@ -102,6 +102,26 @@ pub const VM = struct {
                 .Pop => {
                     _ = try self.pop();
                 },
+                .JumpIfFalse => {
+                    const offset = self.readShort();
+                    if ((try self.pop()).isFalsey()) self.ip += offset;
+                },
+                .And => {
+                    const offset = self.readShort();
+                    if (self.peek(0).isFalsey()) self.ip += offset;
+                },
+                .Or => {
+                    const offset = self.readShort();
+                    if (!self.peek(0).isFalsey()) self.ip += offset;
+                },
+                .Jump => {
+                    const offset = self.readShort();
+                    self.ip += offset;
+                },
+                .Loop => {
+                    const offset = self.readShort();
+                    self.ip -= offset;
+                },
                 .Return => return,
                 .Class => {},
                 .Fun => {},
@@ -171,6 +191,12 @@ pub const VM = struct {
         const byte = self.ip[0];
         self.ip += 1;
         return byte;
+    }
+
+    fn readShort(self: *Self) u16 {
+        const short = @as(u16, self.ip[0]) << 8 | self.ip[1];
+        self.ip += 2;
+        return short;
     }
 
     fn readConstant(self: *Self) value.Value {

@@ -6,6 +6,18 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
+- **Chapter 23**: Jumping Back and Forth - ✅ Complete
+  - Complete control flow system with if/else statements, while loops, and for loops
+  - Advanced jump management with 16-bit encoding supporting reasonable function sizes
+  - Logical operators (`and`, `or`) with short-circuit evaluation for optimal performance
+  - Control flow statements: `if (condition) statement else statement` with proper scoping
+  - Loop constructs: `while (condition) statement` and `for (init; condition; increment) statement`
+  - Jump instruction processing with efficient IP manipulation and compact bytecode
+  - Critical limitation: 16-bit jump distances limit functions to ~65KB bytecode size
+  - New OpCodes: `Jump`, `JumpIfFalse`, `Loop`, `And`, `Or` for comprehensive control flow
+  - Perfect integration with local variable system maintaining proper scoping throughout
+  - Robust error handling with "Too much code to jump over" detection for large functions
+
 - **Chapter 22**: Local Variables - ✅ Complete
   - Complete block scoping system with `{` and `}` syntax for nested scope management
   - Stack-based local variable storage with O(1) direct indexing for maximum performance

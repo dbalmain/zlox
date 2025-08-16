@@ -65,7 +65,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .Identifier => ParseRule.init(variable, null, .None),
         .String => ParseRule.init(string, null, .None),
         .Number => ParseRule.init(number, null, .None),
-        .And => ParseRule.init(null, null, .None),
+        .And => ParseRule.init(null, and_, .And),
         .Class => ParseRule.init(null, null, .None),
         .Else => ParseRule.init(null, null, .None),
         .False => ParseRule.init(literal, null, .None),
@@ -73,7 +73,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .Fun => ParseRule.init(null, null, .None),
         .If => ParseRule.init(null, null, .None),
         .Nil => ParseRule.init(literal, null, .None),
-        .Or => ParseRule.init(null, null, .None),
+        .Or => ParseRule.init(null, or_, .Or),
         .Print => ParseRule.init(null, null, .None),
         .Return => ParseRule.init(null, null, .None),
         .Super => ParseRule.init(null, null, .None),
@@ -131,6 +131,7 @@ const Compiler = struct {
     locals: [LOCAL_MAX]Local,
     local_top: u9,
     scope_depth: u7,
+    loop_start: ?usize,
 
     fn init(heap: *object.Heap, source: []const u8, chk: *chunk.Chunk) Self {
         return Compiler{
@@ -145,6 +146,7 @@ const Compiler = struct {
             .locals = undefined,
             .local_top = 0,
             .scope_depth = 0,
+            .loop_start = null,
         };
     }
 
@@ -319,6 +321,12 @@ const Compiler = struct {
     fn statement(self: *Self) CompileError!void {
         if (self.match(.Print)) {
             try self.printStatement();
+        } else if (self.match(.If)) {
+            try self.ifStatement();
+        } else if (self.match(.While)) {
+            try self.whileStatement();
+        } else if (self.match(.For)) {
+            try self.forStatement();
         } else if (self.match(.LeftBrace)) {
             self.beginScope();
             try self.block();
@@ -326,6 +334,114 @@ const Compiler = struct {
         } else {
             try self.expressionStatement();
         }
+    }
+
+    fn ifStatement(self: *Self) CompileError!void {
+        self.consume(.LeftParen, "Expect '(' after 'if'.");
+        try self.expression();
+        self.consume(.RightParen, "Expect ')' after 'if' condition.");
+        const then_jump = try self.emitJump(.JumpIfFalse);
+        try self.statement();
+        if (self.match(.Else)) {
+            const else_jump = try self.emitJump(.Jump);
+            try self.patchJump(then_jump);
+            try self.statement();
+            try self.patchJump(else_jump);
+        } else {
+            try self.patchJump(then_jump);
+        }
+    }
+
+    fn whileStatement(self: *Self) CompileError!void {
+        self.consume(.LeftParen, "Expect '(' after 'while'.");
+        const previous_loop_start = self.loop_start;
+        const loop_start = self.currentOffset();
+        self.loop_start = loop_start;
+        try self.expression();
+        self.consume(.RightParen, "Expect ')' after 'while' condition.");
+        const exit_jump = try self.emitJump(.JumpIfFalse);
+        try self.statement();
+        try self.emitLoop(loop_start);
+        try self.patchJump(exit_jump);
+        self.loop_start = previous_loop_start;
+    }
+
+    fn forStatement(self: *Self) CompileError!void {
+        self.beginScope();
+        self.consume(.LeftParen, "Expect '(' after 'for'.");
+        if (self.match(.Semicolon)) {
+            // no initialiser
+        } else if (self.match(.Var)) {
+            try self.varDeclaration();
+        } else {
+            try self.expressionStatement();
+        }
+        var loop_start = self.currentOffset();
+        var exit_jump: ?usize = null;
+        if (!self.match(.Semicolon)) {
+            try self.expression();
+            self.consume(.Semicolon, "Expect ';' after 'for' condition.");
+            exit_jump = try self.emitJump(.JumpIfFalse);
+        }
+        if (!self.match(.RightParen)) {
+            const increment_jump = try self.emitJump(.Jump);
+            const loop_increment = self.currentOffset();
+            self.can_assign = true;
+            try self.expression();
+            try self.emitCode(.Pop);
+            self.consume(.RightParen, "Expect ')' after 'for' clauses.");
+            try self.emitLoop(loop_start);
+            loop_start = loop_increment;
+            try self.patchJump(increment_jump);
+        }
+        const previous_loop_start = self.loop_start;
+        self.loop_start = loop_start;
+        try self.statement();
+        try self.emitLoop(loop_start);
+        if (exit_jump) |offset| {
+            try self.patchJump(offset);
+        }
+        try self.endScope();
+        self.loop_start = previous_loop_start;
+    }
+
+    fn currentOffset(self: *Self) usize {
+        return self.chunk.code.items.len;
+    }
+
+    /// Emits a jump instruction with placeholder 16-bit offset that will be patched later.
+    /// Jump distance is limited to 65,535 bytes (64KB) due to 16-bit encoding.
+    /// This affects maximum function size and loop body size in practice.
+    fn emitJump(self: *Self, code: chunk.OpCode) CompileError!usize {
+        try self.emitCode(code);
+        try self.emitByte(0xff);
+        try self.emitByte(0xff);
+        return self.chunk.code.items.len - 2;
+    }
+
+    /// Emits a backward jump instruction for loops with 16-bit distance encoding.
+    /// Jump distance limited to 65,535 bytes (64KB). Large loop bodies may exceed
+    /// this limit, particularly in complex nested structures or very long functions.
+    fn emitLoop(self: *Self, loopStart: usize) CompileError!void {
+        const jump = self.chunk.code.items.len - loopStart + 3;
+        if (jump > std.math.maxInt(u16)) {
+            self.compileError("Too much code to jump over");
+        }
+        try self.emitCode(.Loop);
+        try self.emitByte(@intCast(jump >> 8));
+        try self.emitByte(@intCast(jump));
+    }
+
+    /// Patches a previously emitted jump instruction with the actual 16-bit distance.
+    /// Forward jump distance limited to 65,535 bytes (64KB). This constrains the
+    /// maximum size of if-statement bodies, function definitions, and other forward jumps.
+    fn patchJump(self: *Self, offset: usize) CompileError!void {
+        const jump = self.chunk.code.items.len - offset - 2;
+        if (jump > std.math.maxInt(u16)) {
+            self.compileError("Too much code to jump over");
+        }
+        self.chunk.code.items[offset] = @intCast(jump >> 8);
+        self.chunk.code.items[offset + 1] = @intCast(jump);
     }
 
     fn block(self: *Self) CompileError!void {
@@ -519,6 +635,20 @@ fn string(c: *Compiler) CompileError!void {
 
 fn variable(c: *Compiler) CompileError!void {
     try c.namedVariable(&c.parser.previous);
+}
+
+fn and_(c: *Compiler) CompileError!void {
+    const andJump = try c.emitJump(.And);
+    try c.emitCode(.Pop);
+    try c.parsePrecedence(.And);
+    try c.patchJump(andJump);
+}
+
+fn or_(c: *Compiler) CompileError!void {
+    const orJump = try c.emitJump(.Or);
+    try c.emitCode(.Pop);
+    try c.parsePrecedence(.Or);
+    try c.patchJump(orJump);
 }
 
 pub fn compile(heap: *object.Heap, source: []const u8) CompileError!chunk.Chunk {

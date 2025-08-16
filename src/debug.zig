@@ -42,6 +42,10 @@ pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?us
         .SetGlobalLong,
         .GetGlobalLong,
         => return globalVariableLongInstruction(self, offset, instruction),
+        .Loop,
+        .Jump,
+        .JumpIfFalse,
+        => return shortVariableInstruction(self, offset, instruction),
         else => return simpleInstruction(instruction, offset),
     }
 }
@@ -73,6 +77,12 @@ fn variableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCo
     const index = self.code.items[offset + 1];
     std.debug.print("{s:<18} {d:>4}\n", .{ @tagName(code), index });
     return offset + 2;
+}
+
+fn shortVariableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
+    const jump: u16 = @as(u16, self.code.items[offset + 1]) << 8 | self.code.items[offset + 2];
+    std.debug.print("{s:<18} {d:>4}\n", .{ @tagName(code), jump });
+    return offset + 3;
 }
 
 fn globalVariableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
