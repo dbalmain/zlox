@@ -1,5 +1,6 @@
 const std = @import("std");
 const object = @import("object.zig");
+const types = @import("types.zig");
 
 pub const Value = union(enum) {
     const Self = @This();
@@ -8,12 +9,12 @@ pub const Value = union(enum) {
     nil: f64,
     obj: *object.Obj,
 
-    pub fn print(self: *const Self) void {
+    pub fn print(self: *const Self, writer: anytype) !void {
         switch (self.*) {
-            .boolean => |b| std.debug.print("{}", .{b}),
-            .number => |n| std.debug.print("{d}", .{n}),
-            .nil => std.debug.print("nil", .{}),
-            .obj => |o| o.print(),
+            .boolean => |b| try writer.print("{}", .{b}),
+            .number => |n| try writer.print("{d}", .{n}),
+            .nil => try writer.print("nil", .{}),
+            .obj => |o| try o.print(writer),
         }
     }
 
@@ -124,7 +125,7 @@ pub fn asObject(o: *object.Obj) Value {
     return Value{ .obj = o };
 }
 
-pub const ValueError = error{ValueOverflow};
+pub const ValueError = types.ValueError;
 
 pub const ValueArray = struct {
     const Self = @This();

@@ -1,0 +1,6 @@
+fun greet(name) {
+  print "Hello, " + name + "!";
+}
+
+// Test arity mismatch
+greet();  // Should error - missing argument

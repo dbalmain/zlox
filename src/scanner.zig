@@ -104,7 +104,7 @@ pub const Scanner = struct {
             '"' => self.string(),
             '0'...'9' => self.number(),
             'a'...'z', 'A'...'Z', '_' => self.identifier(),
-            else => self.errorToken("Unexpected character"),
+            else => self.errorToken("Unexpected character."),
         };
     }
 
@@ -138,7 +138,7 @@ pub const Scanner = struct {
     }
 
     fn skipWhitespace(self: *Self) void {
-        while (true) {
+        while (!self.isAtEnd()) {
             const c = self.peek();
             switch (c) {
                 ' ', '\r', '\t' => self.advance(),
@@ -182,7 +182,7 @@ pub const Scanner = struct {
             self.advance();
         }
 
-        if (self.isAtEnd()) return self.errorToken("Unterminated String");
+        if (self.isAtEnd()) return self.errorToken("Unterminated string.");
 
         self.advance();
         return self.makeToken(.String);

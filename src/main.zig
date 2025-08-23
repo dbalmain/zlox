@@ -26,13 +26,15 @@ const ExitCode = enum(u8) {
 };
 
 fn exitWithError(comptime message: []const u8, code: ExitCode) noreturn {
-    const stderr = std.io.getStdErr().writer();
-    stderr.print("{s}\n", .{message}) catch {};
+    if (config.trace) {
+        const stderr = std.io.getStdErr().writer();
+        stderr.print("{s}\n", .{message}) catch {};
+    }
     std.process.exit(@intFromEnum(code));
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 10 }){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -89,10 +91,9 @@ fn runFile(allocator: std.mem.Allocator, file_path: []const u8) !void {
 fn interpret(allocator: std.mem.Allocator, source: []u8) !void {
     var heap = object.Heap.init(allocator);
     defer heap.deinit();
-    var chunk = try compiler.compile(&heap, source);
-    defer chunk.deinit();
+    const function = try compiler.compile(&heap, source);
 
-    var vm = VM.VM.init(&heap, &chunk);
+    var vm = try VM.VM.init(&heap, function);
     defer vm.deinit();
 
     return vm.run();

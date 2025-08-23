@@ -37,6 +37,7 @@ pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?us
         => return globalVariableInstruction(self, offset, instruction),
         .SetLocal,
         .GetLocal,
+        .Call,
         => return variableInstruction(self, offset, instruction),
         .DefineGlobalLong,
         .SetGlobalLong,
@@ -59,7 +60,7 @@ fn simpleInstruction(code: chunk.OpCode, offset: usize) !usize {
 fn constantInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
     const constant = self.code.items[offset + 1];
     std.debug.print("{s:<18} {d:>4} '", .{ @tagName(code), constant });
-    self.constants.values.items[constant].print();
+    try self.constants.values.items[constant].print(std.io.getStdErr().writer());
     std.debug.print("'\n", .{});
     return offset + 2;
 }
@@ -69,7 +70,7 @@ fn constantLongInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.
         (@as(u24, self.code.items[offset + 2]) << 8) |
         (@as(u24, self.code.items[offset + 3]) << 16);
     std.debug.print("{s:<18} {d:>4} '", .{ @tagName(code), constant });
-    self.constants.values.items[constant].print();
+    try self.constants.values.items[constant].print(std.io.getStdErr().writer());
     std.debug.print("'\n", .{});
     return offset + 4;
 }
@@ -88,7 +89,7 @@ fn shortVariableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk
 
 fn globalVariableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
     const index = self.code.items[offset + 1];
-    std.debug.print("{s:<18} {d:>4} '{s}'\n", .{ @tagName(code), index, self.names.items[index] });
+    std.debug.print("{s:<18} {d:>4} '{s}'\n", .{ @tagName(code), index, self.heap.names.items[index] });
     return offset + 2;
 }
 
@@ -96,6 +97,6 @@ fn globalVariableLongInstruction(self: *const chunk.Chunk, offset: usize, code: 
     const index = @as(u24, self.code.items[offset + 1]) |
         (@as(u24, self.code.items[offset + 2]) << 8) |
         (@as(u24, self.code.items[offset + 3]) << 16);
-    std.debug.print("{s:<18} {d:>4} '{s}'\n", .{ @tagName(code), index, self.names.items[index] });
+    std.debug.print("{s:<18} {d:>4} '{s}'\n", .{ @tagName(code), index, self.heap.names.items[index] });
     return offset + 4;
 }

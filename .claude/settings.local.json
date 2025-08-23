@@ -7,7 +7,11 @@
       "WebFetch(domain:craftinginterpreters.com)",
       "Bash(cat:*)",
       "Bash(./zig-out/bin/zlox:*)",
-      "Bash(git tag:*)"
+      "Bash(git tag:*)",
+      "Bash(./run-tests)",
+      "Bash(./clox test/operator/add_bool_num.lox)",
+      "Bash(./zlox:*)",
+      "Bash(./clox:*)"
     ],
     "deny": []
   }
