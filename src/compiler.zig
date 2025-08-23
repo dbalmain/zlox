@@ -5,8 +5,7 @@ const value = @import("value.zig");
 const object = @import("object.zig");
 const debug = @import("debug.zig");
 const config = @import("config");
-
-const LOCAL_MAX = 256;
+const types = @import("types.zig");
 
 const Precedence = enum {
     None,
@@ -43,7 +42,7 @@ const ParseRule = struct {
 
 fn getRule(token_type: scanner.TokenType) ParseRule {
     return switch (token_type) {
-        .LeftParen => ParseRule.init(grouping, null, .None),
+        .LeftParen => ParseRule.init(grouping, call, .Call),
         .RightParen => ParseRule.init(null, null, .None),
         .LeftBrace => ParseRule.init(null, null, .None),
         .RightBrace => ParseRule.init(null, null, .None),
@@ -92,13 +91,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
     };
 }
 
-const CompileError = error{
-    CompileError,
-    UnexpectedEof,
-    ParseError,
-    UnexpectedError,
-    OutOfMemory,
-};
+const CompileError = types.CompileError;
 
 const Parser = struct {
     const Self = @This();
@@ -112,54 +105,49 @@ const Parser = struct {
     }
 };
 
-const Local = struct {
-    name_index: u24,
-    depth: i8,
-
-    fn init(name_index: u24) Local {
-        return Local{
-            .name_index = name_index,
-            .depth = -1,
-        };
-    }
-};
+const SCRIPT_NAME = "<script>";
 
 const Compiler = struct {
     const Self = @This();
-    heap: *object.Heap,
-    scanner: scanner.Scanner,
-    chunk: *chunk.Chunk,
-    parser: Parser,
-    can_assign: bool,
-    panic_mode: bool,
-    err: ?CompileError,
-    names: std.StringHashMap(u24),
-    locals: [LOCAL_MAX]Local,
-    local_top: u9,
-    scope_depth: u7,
-    loop_start: ?usize,
     break_address: ?usize,
+    can_assign: bool,
+    err: ?CompileError,
+    fun: object.Function,
+    heap: *object.Heap,
+    loop_start: ?usize,
+    panic_mode: bool,
+    parser: Parser,
+    scanner: scanner.Scanner,
+    scope_depth: u7,
 
-    fn init(heap: *object.Heap, source: []const u8, chk: *chunk.Chunk) Self {
+    fn init(
+        heap: *object.Heap,
+        source: []const u8,
+        function_type: object.FunctionType,
+    ) CompileError!Self {
+        // We put the script name into the heap so it can be printed
+        const script_name: u24 = heap.makeIdentifier(SCRIPT_NAME) catch return CompileError.OutOfMemory;
         return Compiler{
-            .heap = heap,
-            .scanner = scanner.Scanner.init(source),
-            .parser = Parser.init(),
-            .chunk = chk,
+            .break_address = null,
             .can_assign = true,
             .err = null,
-            .panic_mode = false,
-            .names = std.StringHashMap(u24).init(heap.allocator),
-            .locals = undefined,
-            .local_top = 0,
-            .scope_depth = 0,
+            .fun = object.Function.init(
+                heap,
+                function_type,
+                script_name,
+                0,
+            ),
+            .heap = heap,
             .loop_start = null,
-            .break_address = null,
+            .panic_mode = false,
+            .parser = Parser.init(),
+            .scanner = scanner.Scanner.init(source),
+            .scope_depth = 0,
         };
     }
 
     fn deinit(self: *Self) void {
-        self.names.deinit();
+        _ = self;
     }
 
     fn parsePrecedence(self: *Self, precedence: Precedence) CompileError!void {
@@ -213,22 +201,22 @@ const Compiler = struct {
     }
 
     fn emitByte(self: *Self, byte: u8) CompileError!void {
-        self.chunk.writeByte(byte) catch {
+        self.fun.chunk.writeByte(byte) catch {
             return CompileError.OutOfMemory;
         };
     }
 
     fn emitCode(self: *Self, code: chunk.OpCode) CompileError!void {
-        self.chunk.writeCode(code, self.parser.previous.line) catch {
+        self.fun.chunk.writeCode(code, self.parser.previous.line) catch {
             return CompileError.OutOfMemory;
         };
     }
 
     fn emitCodes(self: *Self, code1: chunk.OpCode, code2: chunk.OpCode) CompileError!void {
-        self.chunk.writeCode(code1, self.parser.previous.line) catch {
+        self.fun.chunk.writeCode(code1, self.parser.previous.line) catch {
             return CompileError.OutOfMemory;
         };
-        self.chunk.writeCode(code2, self.parser.previous.line) catch {
+        self.fun.chunk.writeCode(code2, self.parser.previous.line) catch {
             return CompileError.OutOfMemory;
         };
     }
@@ -239,7 +227,7 @@ const Compiler = struct {
     }
 
     fn emitConstant(self: *Self, val: value.Value) CompileError!void {
-        self.chunk.writeConstant(val, self.parser.previous.line) catch {
+        self.fun.chunk.writeConstant(val, self.parser.previous.line) catch {
             return CompileError.OutOfMemory;
         };
     }
@@ -249,6 +237,7 @@ const Compiler = struct {
     }
 
     fn emitReturn(self: *Self) CompileError!void {
+        try self.emitCode(.Nil);
         try self.emitCode(.Return);
     }
 
@@ -262,12 +251,13 @@ const Compiler = struct {
         const stderr = std.io.getStdErr().writer();
         stderr.print("[line {d}] Error", .{token.line}) catch {};
         if (token.type == .Eof) {
-            stderr.print(" at end", .{}) catch unreachable;
+            stderr.print(" at end:", .{}) catch unreachable;
             self.err = CompileError.UnexpectedEof;
         } else if (token.type == .Error) {
+            stderr.print(":", .{}) catch unreachable;
             self.err = CompileError.ParseError;
         } else {
-            stderr.print(" at '{s}'", .{token.start[0..token.len]}) catch unreachable;
+            stderr.print(" at '{s}':", .{token.start[0..token.len]}) catch unreachable;
             self.err = CompileError.CompileError;
         }
         stderr.print(" {s}\n", .{message}) catch unreachable;
@@ -307,6 +297,8 @@ const Compiler = struct {
         self.can_assign = true;
         if (self.match(.Var)) {
             try self.varDeclaration();
+        } else if (self.match(.Fun)) {
+            try self.funDeclaration();
         } else {
             try self.statement();
         }
@@ -326,20 +318,57 @@ const Compiler = struct {
         try self.defineVariable(global);
     }
 
+    fn funDeclaration(self: *Self) CompileError!void {
+        const global = try self.parseVariable("Expect function name.");
+        self.markInitialised();
+        try self.function(.Function, global);
+        try self.defineVariable(global);
+    }
+
+    fn function(self: *Self, function_type: object.FunctionType, name: u24) CompileError!void {
+        const outer_fun = self.fun;
+        self.consume(.LeftParen, "Expect '(' after function name.");
+        self.fun = object.Function.init(self.heap, function_type, name, 0);
+        self.beginScope();
+        if (!self.check(.RightParen)) {
+            while (true) {
+                if (self.fun.arity == std.math.maxInt(u8)) {
+                    return self.errorAtCurrent("Can't have more than 255 parameters.");
+                }
+                self.fun.arity += 1;
+                const param = try self.parseVariable("Expect parameter name.");
+                try self.defineVariable(param);
+                if (!self.match(.Comma)) break;
+            }
+        }
+        self.consume(.RightParen, "Expect ')' after parameters.");
+        self.consume(.LeftBrace, "Expect '{' before function body.");
+        try self.block();
+        try self.endScope();
+
+        try self.emitReturn();
+
+        const inner_fun = value.asObject(self.heap.makeFunction(self.fun) catch return CompileError.OutOfMemory);
+        self.fun = outer_fun;
+        try self.emitConstant(inner_fun);
+    }
+
     fn defineVariable(self: *Self, index: u24) CompileError!void {
         if (self.scope_depth > 0) {
             self.markInitialised();
             return;
         }
-        self.chunk.defineVariable(index, self.parser.previous.line) catch
+        self.fun.chunk.defineVariable(index, self.parser.previous.line) catch
             return CompileError.OutOfMemory;
     }
 
     fn markInitialised(self: *Self) void {
-        self.locals[self.local_top - 1].depth = self.scope_depth;
+        if (self.scope_depth == 0) return;
+        self.fun.locals[self.fun.local_top - 1].depth = self.scope_depth;
     }
 
     fn statement(self: *Self) CompileError!void {
+        self.can_assign = true;
         if (self.match(.Print)) {
             try self.printStatement();
         } else if (self.match(.If)) {
@@ -348,12 +377,14 @@ const Compiler = struct {
             try self.whileStatement();
         } else if (self.match(.For)) {
             try self.forStatement();
+        } else if (self.match(.Switch)) {
+            try self.switchStatement();
         } else if (self.match(.Continue)) {
             try self.continueStatement();
         } else if (self.match(.Break)) {
             try self.breakStatement();
-        } else if (self.match(.Switch)) {
-            try self.switchStatement();
+        } else if (self.match(.Return)) {
+            try self.returnStatement();
         } else if (self.match(.LeftBrace)) {
             self.beginScope();
             try self.block();
@@ -485,8 +516,21 @@ const Compiler = struct {
         }
     }
 
+    fn returnStatement(self: *Self) CompileError!void {
+        if (self.fun.function_type == .Script) {
+            self.compileError("Can't return from top-level code.");
+        }
+        if (self.match(.Semicolon)) {
+            try self.emitReturn();
+        } else {
+            try self.expression();
+            self.consume(.Semicolon, "Expect ';' after return value.");
+            try self.emitCode(.Return);
+        }
+    }
+
     fn currentOffset(self: *Self) usize {
-        return self.chunk.code.items.len;
+        return self.fun.chunk.code.items.len;
     }
 
     /// Emits a jump instruction with placeholder 16-bit offset that will be patched later.
@@ -496,16 +540,16 @@ const Compiler = struct {
         try self.emitCode(code);
         try self.emitByte(0xff);
         try self.emitByte(0xff);
-        return self.chunk.code.items.len - 2;
+        return self.fun.chunk.code.items.len - 2;
     }
 
     /// Emits a backward jump instruction for loops with 16-bit distance encoding.
     /// Jump distance limited to 65,535 bytes (64KB). Large loop bodies may exceed
     /// this limit, particularly in complex nested structures or very long functions.
     fn emitLoop(self: *Self, loop_start: usize) CompileError!void {
-        const jump = self.chunk.code.items.len - loop_start + 3;
+        const jump = self.fun.chunk.code.items.len - loop_start + 3;
         if (jump > std.math.maxInt(u16)) {
-            self.compileError("Too much code to jump over");
+            return self.compileError("Loop body too large.");
         }
         try self.emitCode(.Loop);
         try self.emitByte(@intCast(jump >> 8));
@@ -513,7 +557,7 @@ const Compiler = struct {
     }
 
     fn emitBreak(self: *Self, break_address: usize) CompileError!void {
-        const jump = self.chunk.code.items.len - break_address + 3;
+        const jump = self.fun.chunk.code.items.len - break_address + 3;
         if (jump > std.math.maxInt(u16)) {
             self.compileError("Too much code to jump over");
         }
@@ -526,12 +570,12 @@ const Compiler = struct {
     /// Forward jump distance limited to 65,535 bytes (64KB). This constrains the
     /// maximum size of if-statement bodies, function definitions, and other forward jumps.
     fn patchJump(self: *Self, offset: usize) CompileError!void {
-        const jump = self.chunk.code.items.len - offset - 2;
+        const jump = self.fun.chunk.code.items.len - offset - 2;
         if (jump > std.math.maxInt(u16)) {
-            self.compileError("Too much code to jump over");
+            return self.compileError("Too much code to jump over");
         }
-        self.chunk.code.items[offset] = @intCast(jump >> 8);
-        self.chunk.code.items[offset + 1] = @intCast(jump);
+        self.fun.chunk.code.items[offset] = @intCast(jump >> 8);
+        self.fun.chunk.code.items[offset + 1] = @intCast(jump);
     }
 
     fn block(self: *Self) CompileError!void {
@@ -548,9 +592,9 @@ const Compiler = struct {
 
     fn endScope(self: *Self) CompileError!void {
         self.scope_depth -= 1;
-        while (self.local_top > 0 and self.locals[self.local_top - 1].depth > self.scope_depth) {
+        while (self.fun.local_top > 0 and self.fun.locals[self.fun.local_top - 1].depth > self.scope_depth) {
             try self.emitCode(.Pop);
-            self.local_top -= 1;
+            self.fun.local_top -= 1;
         }
     }
 
@@ -564,31 +608,31 @@ const Compiler = struct {
     }
 
     fn declareVariable(self: *Self, name_index: u24) void {
-        if (self.local_top == LOCAL_MAX) {
-            self.compileError("Too many local variables in function");
+        if (self.fun.local_top == object.LOCAL_MAX) {
+            self.compileError("Too many local variables in function.");
             return;
         }
-        var i = self.local_top;
+        var i = self.fun.local_top;
         while (i > 0) {
             i -= 1;
-            const local = self.locals[i];
+            const local = self.fun.locals[i];
             if (local.depth != -1 and local.depth < self.scope_depth) break;
             if (local.name_index == name_index) {
-                self.compileError("Can't redeclare local variable.");
+                self.compileError("Already a variable with this name in this scope.");
             }
         }
-        self.locals[self.local_top] = Local.init(name_index);
-        self.local_top += 1;
+        self.fun.locals[self.fun.local_top] = object.Local.init(name_index);
+        self.fun.local_top += 1;
     }
 
     fn resolveLocal(self: *Self, name_index: u24) ?u8 {
-        var i = self.local_top;
+        var i = self.fun.local_top;
         while (i > 0) {
             i -= 1;
-            const local = self.locals[i];
+            const local = self.fun.locals[i];
             if (local.name_index == name_index) {
                 if (local.depth == -1) {
-                    self.compileError("Can't read local variable in its own initialiser.");
+                    self.compileError("Can't read local variable in its own initializer.");
                 }
                 return @intCast(i);
             }
@@ -598,14 +642,7 @@ const Compiler = struct {
 
     fn makeIdentifier(self: *Self, name_token: *scanner.Token) CompileError!u24 {
         const name = name_token.start[0..name_token.len];
-        if (self.names.get(name)) |index| {
-            return index;
-        } else {
-            const index: u24 = @intCast(self.chunk.names.items.len);
-            self.chunk.names.append(name) catch return CompileError.OutOfMemory;
-            self.names.put(name, index) catch return CompileError.OutOfMemory;
-            return index;
-        }
+        return self.heap.makeIdentifier(name) catch CompileError.OutOfMemory;
     }
 
     fn namedVariable(self: *Self, name: *scanner.Token) CompileError!void {
@@ -628,13 +665,30 @@ const Compiler = struct {
     }
 
     fn setGlobal(self: *Self, index: u24) CompileError!void {
-        self.chunk.setGlobal(index, self.parser.previous.line) catch
+        self.fun.chunk.setGlobal(index, self.parser.previous.line) catch
             return CompileError.OutOfMemory;
     }
 
     fn getGlobal(self: *Self, index: u24) CompileError!void {
-        self.chunk.getGlobal(index, self.parser.previous.line) catch
+        self.fun.chunk.getGlobal(index, self.parser.previous.line) catch
             return CompileError.OutOfMemory;
+    }
+
+    fn argumentList(self: *Self) CompileError!u8 {
+        var arg_count: u8 = 0;
+        if (!self.check(.RightParen)) {
+            while (true) {
+                try self.expression();
+                if (arg_count == std.math.maxInt(u8)) {
+                    self.compileError("Can't have more than 255 arguments.");
+                    return CompileError.CompileError;
+                }
+                arg_count += 1;
+                if (!self.match(.Comma)) break;
+            }
+        }
+        self.consume(.RightParen, "Expect ')' after arguments.");
+        return arg_count;
     }
 
     fn printStatement(self: *Self) CompileError!void {
@@ -655,11 +709,13 @@ const Compiler = struct {
             try self.declaration();
         }
         try self.endCompiler();
-        if (self.err) |err| {
-            debug.disassembleChunk(self.chunk, "source") catch {
-                std.debug.print("Error disassembling chunk", .{});
-            };
-            return err;
+        if (config.trace) {
+            if (self.err) |err| {
+                debug.disassembleChunk(&self.fun.chunk, self.fun.heap.names.items[self.fun.name_index]) catch {
+                    std.debug.print("Error disassembling chunk", .{});
+                };
+                return err;
+            }
         }
     }
 };
@@ -674,8 +730,14 @@ fn number(c: *Compiler) CompileError!void {
 }
 
 fn grouping(c: *Compiler) CompileError!void {
+    c.can_assign = true;
     try c.expression();
     c.consume(.RightParen, "Expect ')' after expression.");
+}
+
+fn call(c: *Compiler) CompileError!void {
+    const arg_count = try c.argumentList();
+    try c.emitCodeAndByte(.Call, arg_count);
 }
 
 fn literal(c: *Compiler) CompileError!void {
@@ -741,13 +803,11 @@ fn or_(c: *Compiler) CompileError!void {
     try c.patchJump(orJump);
 }
 
-pub fn compile(heap: *object.Heap, source: []const u8) CompileError!chunk.Chunk {
-    var chk = chunk.Chunk.init(heap.allocator);
-    errdefer chk.deinit();
-    var compiler = Compiler.init(heap, source, &chk);
+pub fn compile(heap: *object.Heap, source: []const u8) CompileError!object.Function {
+    var compiler = try Compiler.init(heap, source, .Script);
     defer compiler.deinit();
     try compiler.run();
     if (compiler.err) |err| return err;
 
-    return chk;
+    return compiler.fun;
 }

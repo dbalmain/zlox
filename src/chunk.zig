@@ -1,5 +1,6 @@
 const std = @import("std");
 const value = @import("value.zig");
+const object = @import("object.zig");
 
 pub const OpCode = enum(u8) {
     Constant,
@@ -39,6 +40,7 @@ pub const OpCode = enum(u8) {
     Or,
     And,
     Break,
+    Call,
     Return,
 };
 
@@ -54,14 +56,14 @@ pub const Chunk = struct {
     code: std.ArrayList(u8),
     constants: value.ValueArray,
     lines: std.ArrayList(CodeLine),
-    names: std.ArrayList([]const u8),
+    heap: *object.Heap,
 
-    pub fn init(allocator: std.mem.Allocator) Chunk {
+    pub fn init(heap: *object.Heap) Chunk {
         return .{
-            .code = std.ArrayList(u8).init(allocator),
-            .constants = value.ValueArray.init(allocator),
-            .lines = std.ArrayList(CodeLine).init(allocator),
-            .names = std.ArrayList([]const u8).init(allocator),
+            .code = std.ArrayList(u8).init(heap.allocator),
+            .constants = value.ValueArray.init(heap.allocator),
+            .lines = std.ArrayList(CodeLine).init(heap.allocator),
+            .heap = heap,
         };
     }
 
@@ -69,7 +71,6 @@ pub const Chunk = struct {
         self.code.deinit();
         self.constants.deinit();
         self.lines.deinit();
-        self.names.deinit();
     }
 
     pub fn writeByte(self: *Self, byte: u8) !void {
@@ -105,10 +106,6 @@ pub const Chunk = struct {
     pub fn writeConstant(self: *Self, val: value.Value, line: u24) !void {
         const index = try self.makeConstant(val);
         try self.writeMaybeLongArg(index, line, .Constant, .ConstantLong);
-    }
-
-    pub fn defineName(self: *Self, name: []u8) !void {
-        try self.names.append(name);
     }
 
     pub fn defineVariable(self: *Self, index: u24, line: u24) !void {
