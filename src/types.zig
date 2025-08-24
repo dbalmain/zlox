@@ -3,6 +3,7 @@ const std = @import("std");
 pub const InterpreterError = error{
     RuntimeError,
     StackUnderflow,
+    InvalidArgument,
 };
 
 pub const CompileError = error{

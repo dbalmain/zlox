@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.23.2] - 2025-08-23
+## [0.24.1] - 2025-08-23
+
+### Added
+- Chapter 24 Exercises: Native Functions
+- Native math functions: `sqrt()`, `sin()`, `cos()`.
+- Robust error handling for invalid arguments in native functions, with specific error messages.
+
+### Changed
+- Refactored the `print` statement implementation to allow output redirection. The `print` statement now writes to standard output instead of standard error.
+- The internal `print` functions in `value.zig` and `object.zig` now accept a `writer` argument for improved flexibility.
+
+### Fixed
+- Corrected error handling in `main.zig` to cover new `InvalidArgument` error from native functions.
+
+## [0.24.0] - 2025-08-23
 
 ### Fixed
 - **Major Milestone**: Complete compatibility with Crafting Interpreters test suite (132/132 tests passing)
