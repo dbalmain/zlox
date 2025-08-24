@@ -90,6 +90,9 @@ pub const VM = struct {
         };
 
         try self.defineNative("clock", 0, clockNative);
+        try self.defineNative("sqrt", 1, sqrtNative);
+        try self.defineNative("sin", 1, sinNative);
+        try self.defineNative("cos", 1, cosNative);
 
         // Create a heap-allocated function object first
         const function_obj = try heap.makeFunction(function);
@@ -240,12 +243,7 @@ pub const VM = struct {
         if (callee.withObject()) |obj| {
             switch (obj.*.data) {
                 .function => |*fun| return self.call(fun, arg_count),
-                .native_function => |*fun| {
-                    const result = try fun.call(arg_count, self.stack[(self.stack_top - arg_count)..self.stack_top]);
-                    self.stack_top = self.stack_top - arg_count - 1;
-                    self.push(result);
-                    return;
-                },
+                .native_function => |*fun| return self.nativeCall(fun, arg_count),
                 else => {},
             }
         }
@@ -264,6 +262,20 @@ pub const VM = struct {
         const slot_start = self.stack_top - arg_count - 1;
         self.frames[self.frames_top] = CallFrame.init(fun, self.stack[slot_start..]);
         self.frames_top += 1;
+    }
+
+    fn nativeCall(self: *Self, fun: *const object.NativeFunction, arg_count: u8) !void {
+        if (arg_count != fun.arity) {
+            return self.runtimeError("Expected {d} arguments but got {d}.", .{ fun.arity, arg_count });
+        }
+        const result = fun.call(arg_count, self.stack[(self.stack_top - arg_count)..self.stack_top]) catch |err| {
+            return switch (err) {
+                error.InvalidArgument => self.runtimeError("Invalid argument provided to native function '{s}'.", .{fun.name}),
+                else => err,
+            };
+        };
+        self.stack_top = self.stack_top - arg_count - 1;
+        self.push(result);
     }
 
     fn binaryOperation(self: *Self, comptime operator: BinaryOperator) !void {
@@ -347,6 +359,32 @@ pub const VM = struct {
         }
     }
 };
+
+fn sinNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+    _ = arg_count;
+    if (args[0].withNumber()) |n| {
+        return value.asNumber(std.math.sin(n));
+    }
+    return InterpreterError.InvalidArgument;
+}
+
+fn cosNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+    _ = arg_count;
+    if (args[0].withNumber()) |n| {
+        return value.asNumber(std.math.cos(n));
+    }
+    return InterpreterError.InvalidArgument;
+}
+
+fn sqrtNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+    _ = arg_count;
+    if (args[0].withNumber()) |n| {
+        if (n >= 0) {
+            return value.asNumber(std.math.sqrt(n));
+        }
+    }
+    return InterpreterError.InvalidArgument;
+}
 
 fn clockNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
     _ = arg_count;

@@ -84,6 +84,7 @@ fn runFile(allocator: std.mem.Allocator, file_path: []const u8) !void {
             error.CompileError => exitWithError("Compile error", .DataErr),
             error.UnexpectedEof => exitWithError("Unexpected EOF", .DataErr),
             error.ParseError => exitWithError("Parser Error", .DataErr),
+            error.InvalidArgument => exitWithError("Invalid argument passed to native function", .Software),
         }
     };
 }
