@@ -112,7 +112,7 @@ const Compiler = struct {
     break_address: ?usize,
     can_assign: bool,
     err: ?CompileError,
-    fun: object.Function,
+    fun: *object.Function,
     heap: *object.Heap,
     loop_start: ?usize,
     panic_mode: bool,
@@ -123,20 +123,14 @@ const Compiler = struct {
     fn init(
         heap: *object.Heap,
         source: []const u8,
-        function_type: object.FunctionType,
+        fun: *object.Function,
     ) CompileError!Self {
         // We put the script name into the heap so it can be printed
-        const script_name: u24 = heap.makeIdentifier(SCRIPT_NAME) catch return CompileError.OutOfMemory;
         return Compiler{
             .break_address = null,
             .can_assign = true,
             .err = null,
-            .fun = object.Function.init(
-                heap,
-                function_type,
-                script_name,
-                0,
-            ),
+            .fun = fun,
             .heap = heap,
             .loop_start = null,
             .panic_mode = false,
@@ -232,6 +226,12 @@ const Compiler = struct {
         };
     }
 
+    fn emitClosure(self: *Self, val: value.Value) CompileError!void {
+        self.fun.chunk.writeClosure(val, self.parser.previous.line) catch {
+            return CompileError.OutOfMemory;
+        };
+    }
+
     fn endCompiler(self: *Self) CompileError!void {
         try self.emitReturn();
     }
@@ -265,6 +265,15 @@ const Compiler = struct {
 
     fn compileError(self: *Self, message: []const u8) void {
         self.errorAt(&self.parser.previous, message);
+    }
+
+    fn handleFunctionError(self: *Self, err: object.FunctionError) void {
+        switch (err) {
+            error.TooManyClosureVariables,
+            => self.compileError("Too many closure variables in function."),
+            error.VariableDeclarationSelfReference,
+            => self.compileError("Can't read local variable in its own initializer."),
+        }
     }
 
     fn synchronise(self: *Self) void {
@@ -328,14 +337,18 @@ const Compiler = struct {
     fn function(self: *Self, function_type: object.FunctionType, name: u24) CompileError!void {
         const outer_fun = self.fun;
         self.consume(.LeftParen, "Expect '(' after function name.");
-        self.fun = object.Function.init(self.heap, function_type, name, 0);
+        const fun_obj = self.heap.makeFunction(
+            object.Function.init(self.heap, function_type, name, 0, outer_fun),
+        ) catch return CompileError.OutOfMemory;
+        self.fun = &fun_obj.data.function;
+        var inner_fun = self.fun;
         self.beginScope();
         if (!self.check(.RightParen)) {
             while (true) {
-                if (self.fun.arity == std.math.maxInt(u8)) {
+                if (inner_fun.arity == std.math.maxInt(u8)) {
                     return self.errorAtCurrent("Can't have more than 255 parameters.");
                 }
-                self.fun.arity += 1;
+                inner_fun.arity += 1;
                 const param = try self.parseVariable("Expect parameter name.");
                 try self.defineVariable(param);
                 if (!self.match(.Comma)) break;
@@ -348,9 +361,17 @@ const Compiler = struct {
 
         try self.emitReturn();
 
-        const inner_fun = value.asObject(self.heap.makeFunction(self.fun) catch return CompileError.OutOfMemory);
         self.fun = outer_fun;
-        try self.emitConstant(inner_fun);
+        const is_closure = inner_fun.upvalue_top > 0;
+        if (is_closure) {
+            try self.emitClosure(value.asObject(fun_obj));
+        } else {
+            try self.emitConstant(value.asObject(fun_obj));
+        }
+        for (inner_fun.upvalues[0..inner_fun.upvalue_top]) |upvalue| {
+            try self.emitByte(if (upvalue.is_local) 1 else 0);
+            try self.emitByte(upvalue.index);
+        }
     }
 
     fn defineVariable(self: *Self, index: u24) CompileError!void {
@@ -592,10 +613,13 @@ const Compiler = struct {
 
     fn endScope(self: *Self) CompileError!void {
         self.scope_depth -= 1;
-        while (self.fun.local_top > 0 and self.fun.locals[self.fun.local_top - 1].depth > self.scope_depth) {
-            try self.emitCode(.Pop);
+        while (self.fun.local_top > 0) {
             self.fun.local_top -= 1;
+            const local = self.fun.locals[self.fun.local_top];
+            if (local.depth <= self.scope_depth) break;
+            try self.emitCode(if (local.is_captured) .CloseUpvalue else .Pop);
         }
+        self.fun.local_top += 1; // local_top points at the next available slot
     }
 
     fn parseVariable(self: *Self, error_message: []const u8) CompileError!u24 {
@@ -625,21 +649,6 @@ const Compiler = struct {
         self.fun.local_top += 1;
     }
 
-    fn resolveLocal(self: *Self, name_index: u24) ?u8 {
-        var i = self.fun.local_top;
-        while (i > 0) {
-            i -= 1;
-            const local = self.fun.locals[i];
-            if (local.name_index == name_index) {
-                if (local.depth == -1) {
-                    self.compileError("Can't read local variable in its own initializer.");
-                }
-                return @intCast(i);
-            }
-        }
-        return null;
-    }
-
     fn makeIdentifier(self: *Self, name_token: *scanner.Token) CompileError!u24 {
         const name = name_token.start[0..name_token.len];
         return self.heap.makeIdentifier(name) catch CompileError.OutOfMemory;
@@ -647,17 +656,27 @@ const Compiler = struct {
 
     fn namedVariable(self: *Self, name: *scanner.Token) CompileError!void {
         const index = try self.makeIdentifier(name);
-        const local_index = self.resolveLocal(index);
+        const local_index = self.fun.resolveLocal(index) catch |err|
+            return self.handleFunctionError(err);
+
         if (self.can_assign and self.match(.Equal)) {
-            try expression(self);
+            try self.expression();
             if (local_index) |i| {
                 try self.emitCodeAndByte(.SetLocal, i);
+            } else if (self.fun.resolveUpvalue(index) catch |err|
+                return self.handleFunctionError(err)) |i|
+            {
+                try self.emitCodeAndByte(.SetUpvalue, i);
             } else {
                 try self.setGlobal(index);
             }
         } else {
             if (local_index) |i| {
                 try self.emitCodeAndByte(.GetLocal, i);
+            } else if (self.fun.resolveUpvalue(index) catch |err|
+                return self.handleFunctionError(err)) |i|
+            {
+                try self.emitCodeAndByte(.GetUpvalue, i);
             } else {
                 try self.getGlobal(index);
             }
@@ -804,10 +823,18 @@ fn or_(c: *Compiler) CompileError!void {
 }
 
 pub fn compile(heap: *object.Heap, source: []const u8) CompileError!object.Function {
-    var compiler = try Compiler.init(heap, source, .Script);
+    const script_name: u24 = heap.makeIdentifier(SCRIPT_NAME) catch return CompileError.OutOfMemory;
+    var function = object.Function.init(
+        heap,
+        .Script,
+        script_name,
+        0,
+        null,
+    );
+    var compiler = try Compiler.init(heap, source, &function);
     defer compiler.deinit();
     try compiler.run();
     if (compiler.err) |err| return err;
 
-    return compiler.fun;
+    return function;
 }

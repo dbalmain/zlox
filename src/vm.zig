@@ -17,16 +17,43 @@ const BinaryOperator = enum {
     Greater,
 };
 
+const Callable = union(enum) {
+    const Self = @This();
+    function: *object.Function,
+    closure: *object.Closure,
+
+    fn name(self: *const Self) []const u8 {
+        return switch (self.*) {
+            .function => |fun| fun.name(),
+            .closure => |closure| closure.function.name(),
+        };
+    }
+
+    fn chk(self: *const Self) *const chunk.Chunk {
+        return switch (self.*) {
+            .function => |fun| &fun.chunk,
+            .closure => |closure| &closure.function.chunk,
+        };
+    }
+
+    fn arity(self: *const Self) u8 {
+        return switch (self.*) {
+            .function => |fun| fun.arity,
+            .closure => |closure| closure.function.arity,
+        };
+    }
+};
+
 const CallFrame = struct {
     const Self = @This();
-    function: *const object.Function,
+    callable: Callable,
     ip: [*]u8,
     slots: []value.Value,
 
-    fn init(function: *const object.Function, slots: []value.Value) Self {
+    fn init(callable: Callable, slots: []value.Value) Self {
         return Self{
-            .function = function,
-            .ip = function.chunk.code.items.ptr,
+            .callable = callable,
+            .ip = callable.chk().code.items.ptr,
             .slots = slots,
         };
     }
@@ -51,7 +78,7 @@ const CallFrame = struct {
     }
 
     fn readConstant(self: *Self) value.Value {
-        return self.function.chunk.constants.values.items[self.readByte()];
+        return self.callable.chk().constants.values.items[self.readByte()];
     }
 
     fn readU24(self: *Self) u24 {
@@ -62,7 +89,7 @@ const CallFrame = struct {
 
     fn readLongConstant(self: *Self) value.Value {
         const index = self.readU24();
-        return self.function.chunk.constants.values.items[index];
+        return self.callable.chk().constants.values.items[index];
     }
 };
 
@@ -71,13 +98,13 @@ const STACK_MAX = FRAMES_MAX * std.math.maxInt(u8);
 
 pub const VM = struct {
     const Self = @This();
-
     frames: [FRAMES_MAX]CallFrame,
     stack: [STACK_MAX]value.Value,
     frames_top: u8,
     stack_top: u16,
     globals: std.AutoHashMap(u24, value.Value),
     heap: *object.Heap,
+    open_upvalues: ?*object.Obj,
 
     pub fn init(heap: *object.Heap, function: object.Function) !Self {
         var self = Self{
@@ -87,6 +114,7 @@ pub const VM = struct {
             .frames_top = 0,
             .stack_top = 0,
             .globals = std.AutoHashMap(u24, value.Value).init(heap.allocator),
+            .open_upvalues = null,
         };
 
         try self.defineNative("clock", 0, clockNative);
@@ -107,16 +135,16 @@ pub const VM = struct {
 
     pub fn run(self: *Self) !void {
         // Now call the function from the heap object
-        try self.call(&self.stack[0].obj.data.function, 0);
+        try self.call(Callable{ .function = &self.stack[0].obj.data.function }, 0);
         const stdout = std.io.getStdOut().writer();
         var frame = &self.frames[self.frames_top - 1];
         var previous_line: u24 = 0;
         while (true) {
             if (config.trace) {
-                const offset: u24 = @intCast(frame.ip - frame.function.chunk.code.items.ptr);
-                const current_line = frame.function.chunk.getLine(offset);
+                const offset: u24 = @intCast(frame.ip - frame.callable.chk().code.items.ptr);
+                const current_line = frame.callable.chk().getLine(offset);
                 _ = debug.disassembleInstruction(
-                    &frame.function.chunk,
+                    frame.callable.chk(),
                     offset,
                     if (current_line == previous_line) null else current_line,
                 ) catch {};
@@ -206,6 +234,7 @@ pub const VM = struct {
                 },
                 .Return => {
                     const result = try self.pop();
+                    self.closeUpvalues(&frame.slots[0]);
                     self.frames_top -= 1;
                     if (self.frames_top == 0) {
                         _ = try self.pop();
@@ -217,12 +246,23 @@ pub const VM = struct {
                     // Refresh frame pointer after frames.pop()
                     frame = &self.frames[self.frames_top - 1];
                 },
+                .Closure => try self.makeClosure(frame, frame.readConstant()),
+                .ClosureLong => try self.makeClosure(frame, frame.readLongConstant()),
+                .GetUpvalue => {
+                    const slot = frame.readByte();
+                    self.push(frame.callable.closure.slots[slot].data.upvalue.location.*);
+                },
+                .SetUpvalue => {
+                    const slot = frame.readByte();
+                    frame.callable.closure.slots[slot].data.upvalue.location.* = self.peek(0).*;
+                },
+                .CloseUpvalue => {
+                    self.closeUpvalues(&self.stack[self.stack_top - 1]);
+                    _ = try self.pop();
+                },
                 .Class => {},
                 .Fun => {},
                 .Var => {},
-                .For => {},
-                .If => {},
-                .While => {},
             }
             // print the stack AFTER the instruction is complete
             if (config.trace and self.stack_top > 0) {
@@ -242,7 +282,8 @@ pub const VM = struct {
     fn callValue(self: *Self, callee: *value.Value, arg_count: u8) !void {
         if (callee.withObject()) |obj| {
             switch (obj.*.data) {
-                .function => |*fun| return self.call(fun, arg_count),
+                .function => |*fun| return self.call(Callable{ .function = fun }, arg_count),
+                .closure => |*closure| return self.call(Callable{ .closure = closure }, arg_count),
                 .native_function => |*fun| return self.nativeCall(fun, arg_count),
                 else => {},
             }
@@ -250,9 +291,9 @@ pub const VM = struct {
         return self.runtimeError("Can only call functions and classes.", .{});
     }
 
-    fn call(self: *Self, fun: *const object.Function, arg_count: u8) !void {
-        if (arg_count != fun.arity) {
-            return self.runtimeError("Expected {d} arguments but got {d}.", .{ fun.arity, arg_count });
+    fn call(self: *Self, callable: Callable, arg_count: u8) !void {
+        if (arg_count != callable.arity()) {
+            return self.runtimeError("Expected {d} arguments but got {d}.", .{ callable.arity(), arg_count });
         }
 
         if (self.frames_top >= FRAMES_MAX) {
@@ -260,7 +301,7 @@ pub const VM = struct {
         }
 
         const slot_start = self.stack_top - arg_count - 1;
-        self.frames[self.frames_top] = CallFrame.init(fun, self.stack[slot_start..]);
+        self.frames[self.frames_top] = CallFrame.init(callable, self.stack[slot_start..]);
         self.frames_top += 1;
     }
 
@@ -276,6 +317,49 @@ pub const VM = struct {
         };
         self.stack_top = self.stack_top - arg_count - 1;
         self.push(result);
+    }
+
+    fn makeClosure(self: *Self, frame: *CallFrame, fun: value.Value) !void {
+        const closure = try object.Closure.init(fun.obj.data.function, self.heap);
+        self.push(value.asObject(try self.heap.makeClosure(closure)));
+        for (0..closure.slots.len) |i| {
+            const is_local = frame.readByte();
+            const index = frame.readByte();
+            closure.slots[i] = if (is_local == 1)
+                try self.captureUpvalue(&frame.slots[index])
+            else
+                frame.callable.closure.slots[index];
+        }
+    }
+
+    fn captureUpvalue(self: *Self, location: *value.Value) !*object.Obj {
+        var prev_upvalue: ?*object.Obj = null;
+        var curr_upvalue = self.open_upvalues;
+        while (curr_upvalue) |upvalue| {
+            if (@intFromPtr(upvalue.data.upvalue.location) <= @intFromPtr(location)) break;
+            prev_upvalue = curr_upvalue;
+            curr_upvalue = upvalue.data.upvalue.next;
+        }
+        if (curr_upvalue) |upvalue| {
+            if (upvalue.data.upvalue.location == location) return upvalue;
+        }
+        const upvalue = try self.heap.makeUpvalue(location);
+        upvalue.data.upvalue.next = curr_upvalue;
+        if (prev_upvalue) |p_upvalue| {
+            p_upvalue.data.upvalue.next = upvalue;
+        } else {
+            self.open_upvalues = upvalue;
+        }
+        return upvalue;
+    }
+
+    fn closeUpvalues(self: *Self, last: *value.Value) void {
+        while (self.open_upvalues) |upvalue| {
+            if (@intFromPtr(upvalue.data.upvalue.location) < @intFromPtr(last)) break;
+            upvalue.data.upvalue.closed = upvalue.data.upvalue.location.*;
+            upvalue.data.upvalue.location = &upvalue.data.upvalue.closed;
+            self.open_upvalues = upvalue.data.upvalue.next;
+        }
     }
 
     fn binaryOperation(self: *Self, comptime operator: BinaryOperator) !void {
@@ -343,9 +427,9 @@ pub const VM = struct {
         while (i > 0) {
             i -= 1;
             const frame = &self.frames[i];
-            const fun = frame.function;
-            const offset = frame.ip - fun.chunk.code.items.ptr - 1;
-            std.debug.print("[line {d}] in {s}\n", .{ fun.chunk.getLine(@intCast(offset)), fun.name() });
+            const callable = frame.callable;
+            const offset = frame.ip - callable.chk().code.items.ptr - 1;
+            std.debug.print("[line {d}] in {s}\n", .{ callable.chk().getLine(@intCast(offset)), callable.name() });
         }
         return InterpreterError.RuntimeError;
     }

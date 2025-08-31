@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) void {
 
     // Define a build option for tracing (zig build -Dtrace=true)
     const trace = b.option(bool, "trace", "Enable detailed tracing output") orelse false;
+    const gc_stress = b.option(bool, "gc-stress", "Run the GC on every step") orelse false;
 
     const lib = b.addStaticLibrary(.{
         .name = "zlox",
@@ -25,6 +26,7 @@ pub fn build(b: *std.Build) void {
 
     const options = b.addOptions();
     options.addOption(bool, "trace", trace);
+    options.addOption(bool, "gc-stress", gc_stress);
     exe.root_module.addOptions("config", options);
 
     b.installArtifact(exe);

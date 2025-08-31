@@ -17,6 +17,11 @@ pub const OpCode = enum(u8) {
     True,
     False,
     Pop,
+    GetUpvalue,
+    SetUpvalue,
+    CloseUpvalue,
+    Closure,
+    ClosureLong,
     Equal,
     Matches,
     Greater,
@@ -30,9 +35,6 @@ pub const OpCode = enum(u8) {
     Class,
     Fun,
     Var,
-    For,
-    If,
-    While,
     Print,
     Loop,
     Jump,
@@ -106,6 +108,11 @@ pub const Chunk = struct {
     pub fn writeConstant(self: *Self, val: value.Value, line: u24) !void {
         const index = try self.makeConstant(val);
         try self.writeMaybeLongArg(index, line, .Constant, .ConstantLong);
+    }
+
+    pub fn writeClosure(self: *Self, val: value.Value, line: u24) !void {
+        const index = try self.makeConstant(val);
+        try self.writeMaybeLongArg(index, line, .Closure, .ClosureLong);
     }
 
     pub fn defineVariable(self: *Self, index: u24, line: u24) !void {

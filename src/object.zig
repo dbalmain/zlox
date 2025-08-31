@@ -6,11 +6,26 @@ const types = @import("types.zig");
 pub const Local = struct {
     name_index: u24,
     depth: i8,
+    is_captured: bool,
 
     pub fn init(name_index: u24) Local {
         return Local{
             .name_index = name_index,
             .depth = -1,
+            .is_captured = false,
+        };
+    }
+};
+
+const Upvalue = struct {
+    const Self = @This();
+    index: u8,
+    is_local: bool,
+
+    fn init(index: u8, is_local: bool) Self {
+        return Self{
+            .index = index,
+            .is_local = is_local,
         };
     }
 };
@@ -93,6 +108,27 @@ pub const Heap = struct {
         return obj;
     }
 
+    pub fn makeClosure(self: *Self, closure: Closure) !*Obj {
+        const obj = try self.allocator.create(Obj);
+        obj.next = self.heap;
+        self.heap = obj;
+        obj.data = Obj.Data{
+            .closure = closure,
+        };
+
+        return obj;
+    }
+    pub fn makeUpvalue(self: *Self, location: *value.Value) !*Obj {
+        const obj = try self.allocator.create(Obj);
+        obj.next = self.heap;
+        self.heap = obj;
+        obj.data = Obj.Data{
+            .upvalue = ObjUpvalue.init(location),
+        };
+
+        return obj;
+    }
+
     pub fn makeNativeFunction(self: *Self, native_function: NativeFunction) !*Obj {
         const obj = try self.allocator.create(Obj);
         obj.next = self.heap;
@@ -118,6 +154,8 @@ pub const Obj = struct {
         string: String,
         function: Function,
         native_function: NativeFunction,
+        closure: Closure,
+        upvalue: ObjUpvalue,
     };
 
     pub fn print(self: *Self, writer: anytype) !void {
@@ -127,6 +165,8 @@ pub const Obj = struct {
             .native_function => try writer.print("<native fn>", .{}),
             // .function => |f| try writer.print("<fn {s}:{d}>", .{ f.name(), f.arity }),
             // .native_function => |f| try writer.print("<nfn {s}:{d}>", .{ f.name, f.arity }),
+            .closure => |c| try writer.print("<fn {s}>", .{c.function.name()}),
+            .upvalue => try writer.print("upvalue", .{}),
         }
     }
 
@@ -140,6 +180,13 @@ pub const Obj = struct {
     pub fn isFunction(self: *const Self) bool {
         return switch (self.*.data) {
             .function => true,
+            else => false,
+        };
+    }
+
+    pub fn isClosure(self: *const Self) bool {
+        return switch (self.*.data) {
+            .closure => true,
             else => false,
         };
     }
@@ -158,11 +205,20 @@ pub const Obj = struct {
         };
     }
 
+    pub fn withClosure(self: *const Self) ?*const Closure {
+        return switch (self.*.data) {
+            .closure => |*c| c,
+            else => null,
+        };
+    }
+
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         switch (self.*.data) {
             .string => |*s| s.deinit(allocator),
             .function => |*f| f.deinit(),
             .native_function => |*n| n.deinit(),
+            .closure => |*c| c.deinit(),
+            .upvalue => {},
         }
         allocator.destroy(self);
     }
@@ -198,25 +254,42 @@ pub const FunctionType = enum {
     Script,
 };
 
+pub const FunctionError = error{
+    TooManyClosureVariables,
+    VariableDeclarationSelfReference,
+};
+
 pub const Function = struct {
     const Self = @This();
     chunk: chunk.Chunk,
     arity: u8,
     local_top: u9,
+    upvalue_top: u9,
     function_type: FunctionType,
     locals: [LOCAL_MAX]Local,
+    upvalues: [LOCAL_MAX]Upvalue,
     name_index: u24,
     heap: *Heap,
+    enclosing: ?*Function,
 
-    pub fn init(heap: *Heap, function_type: FunctionType, name_index: u24, arity: u8) Self {
+    pub fn init(
+        heap: *Heap,
+        function_type: FunctionType,
+        name_index: u24,
+        arity: u8,
+        enclosing: ?*Function,
+    ) Self {
         return Self{
             .arity = arity,
             .chunk = chunk.Chunk.init(heap),
             .local_top = 1,
+            .upvalue_top = 0,
             .function_type = function_type,
             .locals = undefined,
+            .upvalues = undefined,
             .name_index = name_index,
             .heap = heap,
+            .enclosing = enclosing,
         };
     }
 
@@ -226,6 +299,54 @@ pub const Function = struct {
 
     pub fn deinit(self: *Self) void {
         self.chunk.deinit();
+    }
+
+    pub fn resolveLocal(self: *const Self, name_index: u24) FunctionError!?u8 {
+        var i = self.local_top;
+        while (i > 0) {
+            i -= 1;
+            const local = self.locals[i];
+            if (local.name_index == name_index) {
+                if (local.depth == -1) {
+                    return FunctionError.VariableDeclarationSelfReference;
+                }
+                return @intCast(i);
+            }
+        }
+        return null;
+    }
+
+    pub fn resolveUpvalue(self: *Self, name_index: u24) FunctionError!?u8 {
+        const maybe_fun = self.enclosing;
+        if (maybe_fun) |fun| {
+            if (try fun.resolveLocal(name_index)) |i| {
+                fun.locals[i].is_captured = true;
+                return self.addUpvalue(i, true);
+            }
+
+            if (try fun.resolveUpvalue(name_index)) |i| {
+                return self.addUpvalue(i, false);
+            }
+        }
+        return null;
+    }
+
+    fn addUpvalue(self: *Self, index: u8, is_local: bool) FunctionError!?u8 {
+        for (0..self.upvalue_top) |i| {
+            const upvalue = self.upvalues[i];
+            if (upvalue.index == index and upvalue.is_local == is_local) {
+                return @intCast(i);
+            }
+        }
+        if (self.upvalue_top > std.math.maxInt(u8)) {
+            return FunctionError.TooManyClosureVariables;
+        }
+        self.upvalues[self.upvalue_top] = Upvalue{
+            .is_local = is_local,
+            .index = index,
+        };
+        self.upvalue_top += 1;
+        return @intCast(self.upvalue_top - 1);
     }
 };
 
@@ -247,5 +368,39 @@ pub const NativeFunction = struct {
 
     pub fn deinit(self: *Self) void {
         _ = self;
+    }
+};
+
+pub const Closure = struct {
+    const Self = @This();
+    function: Function,
+    slots: []*Obj,
+    heap: *Heap,
+
+    pub fn init(function: Function, heap: *Heap) !Self {
+        return Self{
+            .function = function,
+            .slots = try heap.allocator.alloc(*Obj, function.upvalue_top),
+            .heap = heap,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.heap.allocator.free(self.slots);
+    }
+};
+
+const ObjUpvalue = struct {
+    const Self = @This();
+    location: *value.Value,
+    closed: value.Value,
+    next: ?*Obj,
+
+    fn init(location: *value.Value) Self {
+        return Self{
+            .location = location,
+            .next = null,
+            .closed = value.nil_val,
+        };
     }
 };

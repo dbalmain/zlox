@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2025-08-31
+
+### Added
+- Chapter 25 - Closures implementation with complete lexical scoping system
+- Complete closure system with upvalue capture for lexical scoping
+- **Upvalue management**: Automatic capture of local variables from enclosing scopes
+- **Closure objects**: First-class function values with captured environment
+- **Memory management**: Proper upvalue lifecycle with automatic cleanup
+- **Stack-to-heap conversion**: Upvalues automatically moved to heap when locals go out of scope
+- **Nested closures**: Support for arbitrarily deep closure nesting with proper variable resolution
+- **Performance optimization**: Direct stack access for captured locals until scope exit
+- New OpCodes for closure operations:
+  - `GetUpvalue`: Direct access to captured variables from enclosing scopes
+  - `SetUpvalue`: Assignment to captured variables with proper upvalue handling
+  - `CloseUpvalue`: Automatic upvalue closure when locals go out of scope
+  - `Closure`: Standard closure creation for functions with captured variables
+  - `ClosureLong`: Extended closure creation supporting large function indices
+- Enhanced object system with closure representation:
+  - `Closure` type with function reference and upvalue slot array for captured environment
+  - `ObjUpvalue` type for individual upvalue management with location tracking
+- Advanced compiler with comprehensive upvalue resolution:
+  - Local upvalue capture supporting direct parent scope variable access
+  - Inherited upvalue chains enabling closure nesting across multiple scope levels
+  - Automatic `is_captured` marking for locals accessed by inner functions
+  - Efficient upvalue deduplication preventing multiple captures of same variable
+- VM integration with sophisticated upvalue tracking:
+  - Open upvalue linked list maintaining stack-to-heap conversion candidates
+  - Automatic upvalue closure at scope boundaries with proper memory management
+  - Closure creation supporting both simple functions and closures with captured variables
+
+### Changed
+- Function object structure enhanced with upvalue tracking and enclosing scope references
+- Compiler function handling redesigned to support closure context and upvalue resolution
+- Local variable system extended with capture tracking for closure variable identification
+- VM execution enhanced with upvalue operations and closure-aware function calls
+- Debug output extended with closure instruction disassembly and upvalue visualization
+
+### Technical Implementation Details
+- **Upvalue Resolution System**:
+  - Two-tier lookup: local variables in enclosing scope, then recursive upvalue chain traversal
+  - Automatic local variable marking with `is_captured` flag for closure optimization
+  - Efficient upvalue slot management with deduplication preventing redundant captures
+- **Memory Management Architecture**:
+  - Open upvalue linked list tracks active stack locations requiring heap conversion
+  - Automatic upvalue closure when stack frames exit scope boundaries
+  - Proper upvalue lifecycle with stack-to-heap conversion and cleanup
+- **Performance Characteristics**:
+  - Direct stack access for captured locals until scope exit maintains optimal performance
+  - O(1) upvalue access after heap conversion with minimal memory overhead
+  - Efficient closure creation with upvalue slot pre-allocation and reuse
+
+### Integration Quality
+- **Seamless Compatibility**: Perfect integration with existing function and local variable systems
+- **Enhanced Function Calls**: Closure-aware function invocation supporting both regular functions and closures
+- **Proper Scoping**: Lexical scoping rules correctly implemented across all nesting levels
+- **Debug Support**: Enhanced disassembler with closure instruction visualization and upvalue tracking
+
+### Testing Verification
+- Basic closures: Functions capturing variables from enclosing scope work correctly
+- Nested closures: Multiple levels of closure nesting with proper variable resolution
+- Upvalue lifecycle: Variables properly converted from stack to heap when scopes exit
+- Closure creation: Both simple functions and closures with captured variables execute correctly
+- Complex scenarios: Recursive closures and closure chains operate as expected
+- Memory management: Heavy closure usage completes without leaks or corruption
+
 ## [0.24.1] - 2025-08-23
 
 ### Added

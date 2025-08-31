@@ -14,6 +14,20 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
+- **Chapter 25**: Closures - ✅ Complete
+  - Complete closure system with upvalue capture for lexical scoping
+  - **Upvalue management**: Automatic capture of local variables from enclosing scopes
+  - **Closure objects**: First-class function values with captured environment
+  - **Memory management**: Proper upvalue lifecycle with automatic cleanup
+  - **Stack-to-heap conversion**: Upvalues automatically moved to heap when locals go out of scope
+  - **Nested closures**: Support for arbitrarily deep closure nesting with proper variable resolution
+  - **Performance optimization**: Direct stack access for captured locals until scope exit
+  - New OpCodes: `GetUpvalue`, `SetUpvalue`, `CloseUpvalue`, `Closure`, `ClosureLong` for closure operations
+  - Enhanced object system with `Closure` and `ObjUpvalue` types for closure representation
+  - Advanced compiler with upvalue resolution supporting local and inherited upvalue chains
+  - VM integration with open upvalue tracking and automatic closure at scope boundaries
+  - Comprehensive closure creation supporting both simple functions and closures with captured variables
+
 - **Chapter 23**: Jumping Back and Forth - ✅ Complete (with Exercises)
   - Complete control flow system with if/else statements, while loops, and for loops
   - **Chapter 23 Exercises**: Advanced control flow with continue, break, and switch statements
