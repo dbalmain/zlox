@@ -350,7 +350,7 @@ pub const Function = struct {
     }
 };
 
-pub const NativeFn = *const fn (arg_count: u8, args: []value.Value) types.InterpreterError!value.Value;
+pub const NativeFn = *const fn (heap: *Heap, arg_count: u8, args: []value.Value) types.InterpreterError!value.Value;
 
 pub const NativeFunction = struct {
     const Self = @This();

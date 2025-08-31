@@ -14,7 +14,7 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 25**: Closures - ✅ Complete
+- **Chapter 25**: Closures - ✅ Complete (with Native Functions)
   - Complete closure system with upvalue capture for lexical scoping
   - **Upvalue management**: Automatic capture of local variables from enclosing scopes
   - **Closure objects**: First-class function values with captured environment
@@ -22,6 +22,11 @@ This project implements the bytecode virtual machine from Part II of the book, w
   - **Stack-to-heap conversion**: Upvalues automatically moved to heap when locals go out of scope
   - **Nested closures**: Support for arbitrarily deep closure nesting with proper variable resolution
   - **Performance optimization**: Direct stack access for captured locals until scope exit
+  - **Native Functions**: Built-in functions for common operations
+    - `clock()` - Returns current timestamp in milliseconds
+    - `sqrt(n)` - Square root of number (errors for negative values)
+    - `sin(n)`, `cos(n)` - Trigonometric functions
+    - `string(value)` - Converts any value to its string representation
   - New OpCodes: `GetUpvalue`, `SetUpvalue`, `CloseUpvalue`, `Closure`, `ClosureLong` for closure operations
   - Enhanced object system with `Closure` and `ObjUpvalue` types for closure representation
   - Advanced compiler with upvalue resolution supporting local and inherited upvalue chains

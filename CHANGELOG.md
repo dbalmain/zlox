@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.1] - 2025-08-31
+
+### Added
+- Native `string(value)` function that converts any value to its string representation
+- Enhanced native function system with heap access for string object creation
+- Chapter 25 Challenge 3 vector implementation using closures in chap25-vector.lox
+
+### Changed
+- Modified native function signature to pass heap access to native functions
+- Updated all existing native functions (clock, sqrt, sin, cos) to work with new signature
+
 ## [0.25.0] - 2025-08-31
 
 ### Added

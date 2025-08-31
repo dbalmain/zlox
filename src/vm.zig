@@ -121,6 +121,7 @@ pub const VM = struct {
         try self.defineNative("sqrt", 1, sqrtNative);
         try self.defineNative("sin", 1, sinNative);
         try self.defineNative("cos", 1, cosNative);
+        try self.defineNative("string", 1, stringNative);
 
         // Create a heap-allocated function object first
         const function_obj = try heap.makeFunction(function);
@@ -309,7 +310,7 @@ pub const VM = struct {
         if (arg_count != fun.arity) {
             return self.runtimeError("Expected {d} arguments but got {d}.", .{ fun.arity, arg_count });
         }
-        const result = fun.call(arg_count, self.stack[(self.stack_top - arg_count)..self.stack_top]) catch |err| {
+        const result = fun.call(self.heap, arg_count, self.stack[(self.stack_top - arg_count)..self.stack_top]) catch |err| {
             return switch (err) {
                 error.InvalidArgument => self.runtimeError("Invalid argument provided to native function '{s}'.", .{fun.name}),
                 else => err,
@@ -444,7 +445,8 @@ pub const VM = struct {
     }
 };
 
-fn sinNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+fn sinNative(heap: *object.Heap, arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+    _ = heap;
     _ = arg_count;
     if (args[0].withNumber()) |n| {
         return value.asNumber(std.math.sin(n));
@@ -452,7 +454,8 @@ fn sinNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
     return InterpreterError.InvalidArgument;
 }
 
-fn cosNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+fn cosNative(heap: *object.Heap, arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+    _ = heap;
     _ = arg_count;
     if (args[0].withNumber()) |n| {
         return value.asNumber(std.math.cos(n));
@@ -460,7 +463,8 @@ fn cosNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
     return InterpreterError.InvalidArgument;
 }
 
-fn sqrtNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+fn sqrtNative(heap: *object.Heap, arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+    _ = heap;
     _ = arg_count;
     if (args[0].withNumber()) |n| {
         if (n >= 0) {
@@ -470,8 +474,27 @@ fn sqrtNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
     return InterpreterError.InvalidArgument;
 }
 
-fn clockNative(arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+fn clockNative(heap: *object.Heap, arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+    _ = heap;
     _ = arg_count;
     _ = args;
     return value.asNumber(@floatFromInt(std.time.milliTimestamp()));
+}
+
+fn stringNative(heap: *object.Heap, arg_count: u8, args: []value.Value) InterpreterError!value.Value {
+    _ = arg_count;
+
+    // Create a buffer to write the string representation to
+    var buffer: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+
+    // Use the existing print method to format the value
+    args[0].print(stream.writer()) catch return InterpreterError.RuntimeError;
+
+    // Create a string object from the buffer
+    const formatted_str = buffer[0..stream.pos];
+
+    // Create and return the string object
+    const string_obj = heap.copyString(formatted_str) catch return InterpreterError.RuntimeError;
+    return value.asObject(string_obj);
 }

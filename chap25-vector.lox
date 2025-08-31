@@ -1,0 +1,57 @@
+// Chapter 25 Challenge 3: Two-dimensional vector using closures
+// Demonstrate object-like behavior with closures
+
+fun makeVector(x, y) {
+  fun getX() { return x; }
+  fun getY() { return y; }
+  
+  fun add(other) {
+    var otherX = other("x");
+    var otherY = other("y");
+    return makeVector(x + otherX, y + otherY);
+  }
+  
+  fun toString() {
+    return "(" + string(x) + ", " + string(y) + ")";
+  }
+  
+  fun vector(method) {
+    if (method == "x") return getX();
+    if (method == "y") return getY();
+    if (method == "add") return add;
+    if (method == "toString") return toString;
+    
+    print "Unknown method: " + method;
+    return nil;
+  }
+  
+  return vector;
+}
+
+// Test the vector implementation
+print "Creating vectors...";
+
+var v1 = makeVector(3, 4);
+var v2 = makeVector(1, 2);
+
+print "Vector 1 x: " + string(v1("x"));
+print "Vector 1 y: " + string(v1("y"));
+print "Vector 2 x: " + string(v2("x"));  
+print "Vector 2 y: " + string(v2("y"));
+
+print "Adding vectors...";
+var v3 = v1("add")(v2);
+
+print "Result x: " + string(v3("x"));
+print "Result y: " + string(v3("y"));
+
+// Display using toString
+print "v1: " + v1("toString")();
+print "v2: " + v2("toString")();  
+print "v3 (v1 + v2): " + v3("toString")();
+
+// Test chaining operations
+print "Chaining operations...";
+var v4 = makeVector(5, 6);
+var result = v1("add")(v2)("add")(v4);
+print "v1 + v2 + v4: " + result("toString")();
