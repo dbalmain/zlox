@@ -107,6 +107,13 @@ pub const Value = union(enum) {
             else => unreachable,
         }
     }
+
+    pub fn mark(self: *Self) void {
+        switch (self.*) {
+            .obj => |o| o.mark(),
+            else => {},
+        }
+    }
 };
 
 pub const nil_val = Value{ .nil = 0 };

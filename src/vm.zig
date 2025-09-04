@@ -25,21 +25,21 @@ const Callable = union(enum) {
     fn name(self: *const Self) []const u8 {
         return switch (self.*) {
             .function => |fun| fun.name(),
-            .closure => |closure| closure.function.name(),
+            .closure => |closure| closure.fun().name(),
         };
     }
 
     fn chk(self: *const Self) *const chunk.Chunk {
         return switch (self.*) {
             .function => |fun| &fun.chunk,
-            .closure => |closure| &closure.function.chunk,
+            .closure => |closure| &closure.fun().chunk,
         };
     }
 
     fn arity(self: *const Self) u8 {
         return switch (self.*) {
             .function => |fun| fun.arity,
-            .closure => |closure| closure.function.arity,
+            .closure => |closure| closure.fun().arity,
         };
     }
 };
@@ -130,11 +130,28 @@ pub const VM = struct {
         return self;
     }
 
+    pub fn markRoots(self: *Self) void {
+        for (self.stack[0..self.stack_top]) |*v| v.mark();
+        var global_iterator = self.globals.iterator();
+        while (global_iterator.next()) |entry| entry.value_ptr.mark();
+        for (self.frames[0..self.frames_top]) |*frame| {
+            for (frame.slots) |*slot| slot.mark();
+        }
+        var maybe_upvalue = self.open_upvalues;
+        while (maybe_upvalue) |upvalue| {
+            upvalue.mark();
+            maybe_upvalue = upvalue.data.upvalue.next;
+        }
+    }
+
     pub fn deinit(self: *Self) void {
         self.globals.deinit();
     }
 
     pub fn run(self: *Self) !void {
+        // Set the markRoots function for garbage collection
+        self.heap.setVm(self);
+
         // Now call the function from the heap object
         try self.call(Callable{ .function = &self.stack[0].obj.data.function }, 0);
         const stdout = std.io.getStdOut().writer();
@@ -321,8 +338,7 @@ pub const VM = struct {
     }
 
     fn makeClosure(self: *Self, frame: *CallFrame, fun: value.Value) !void {
-        const closure = try object.Closure.init(fun.obj.data.function, self.heap);
-        self.push(value.asObject(try self.heap.makeClosure(closure)));
+        const closure = try object.Closure.init(fun.obj, self.heap);
         for (0..closure.slots.len) |i| {
             const is_local = frame.readByte();
             const index = frame.readByte();
@@ -331,6 +347,7 @@ pub const VM = struct {
             else
                 frame.callable.closure.slots[index];
         }
+        self.push(value.asObject(try self.heap.makeClosure(closure)));
     }
 
     fn captureUpvalue(self: *Self, location: *value.Value) !*object.Obj {
