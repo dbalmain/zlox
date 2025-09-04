@@ -14,6 +14,22 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
+- **Chapter 26**: Garbage Collection - ✅ Complete 
+  - Complete mark-and-sweep garbage collection system with automatic memory management
+  - **Object-count based GC triggering**: Collection activates when object count reaches threshold or under gc-stress mode
+  - **VM pointer approach**: Direct heap-to-VM communication avoiding circular dependencies between heap and VM modules  
+  - **Comprehensive root marking**: Stack values, global variables, call frame slots, and open upvalues all properly marked
+  - **Object marking with cycle detection**: All object types support marking through `mark()` method with `is_marked` flag
+  - **Sweep phase with cleanup**: Unmarked objects automatically freed with proper string interning cleanup
+  - **Configurable GC options**:
+    - `gc-stress`: Forces GC on every allocation for testing memory management
+    - `gc-log`: Enables detailed garbage collection debug logging with allocation/deallocation tracking
+    - `gc-grow-factor`: Configurable growth multiplier for GC threshold (default: 2x)
+  - **Performance optimizations**: Object-count based triggering more predictable than byte-based approaches
+  - **String interning integration**: Proper cleanup of interned strings during sweep phase 
+  - **Comprehensive statistics**: GC logging shows objects collected, before/after counts, and next collection threshold
+  - **Memory safety**: All object types properly handle marking of referenced objects to prevent premature collection
+
 - **Chapter 25**: Closures - ✅ Complete (with Native Functions)
   - Complete closure system with upvalue capture for lexical scoping
   - **Upvalue management**: Automatic capture of local variables from enclosing scopes
@@ -89,6 +105,15 @@ zig build run -- script.lox
 
 # Run with trace output (debug VM execution)
 zig build run -Dtrace=true
+
+# Run with garbage collection stress testing
+zig build run -Dgc-stress=true -- script.lox
+
+# Run with detailed GC logging
+zig build run -Dgc-log=true -- script.lox
+
+# Run with custom GC growth factor (default: 2)
+zig build run -Dgc-grow-factor=3 -- script.lox
 
 # Run tests
 zig build test

@@ -5,6 +5,108 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2025-09-04
+
+### Added
+- Chapter 26 - Garbage Collection implementation with complete mark-and-sweep system
+- **Complete Mark-and-Sweep GC System**: Automatic memory management with object-count based triggering for predictable collection cycles
+- **VM Pointer Architecture**: Direct heap-to-VM communication using `setVm()` avoiding circular dependencies between modules
+- **Object-Count Based Triggering**: GC activates when `obj_count` reaches `next_gc` threshold or under stress testing mode
+- **Configurable GC Options** via build system:
+  - `gc-stress`: Forces garbage collection on every single allocation for comprehensive memory management testing
+  - `gc-log`: Enables detailed debug logging showing allocation, deallocation, and collection statistics
+  - `gc-grow-factor`: Configurable threshold growth multiplier (default: 2x, customizable for memory pressure tuning)
+- **Comprehensive Root Marking System** via `VM.markRoots()`:
+  - Stack values marked for all values on VM execution stack preventing premature collection
+  - Global variables marked through globals HashMap iterator ensuring persistent value survival
+  - Call frame slots marked for all active function call contexts maintaining execution state
+  - Open upvalues marked via linked list traversal preserving closure variable references
+- **Object Marking with Cycle Detection**: All object types support `mark()` method with `is_marked` boolean flag
+  - **Function Marking**: Marks all constants in function chunk preventing constant table collection
+  - **Closure Marking**: Marks both function reference and all upvalue slots preserving closure environment
+  - **Upvalue Marking**: Marks location value ensuring captured variables remain accessible
+  - **String Objects**: Automatically marked when referenced, no special handling needed
+  - **Native Functions**: Statically allocated, no marking required
+- **Sweep Phase with Comprehensive Cleanup**:
+  - Unmarked object detection through heap linked list traversal
+  - **String Interning Cleanup**: Removes collected strings from interning HashMap preventing memory leaks
+  - Proper object deallocation with type-specific cleanup for all object variants
+  - Object count tracking with automatic decrement during deallocation
+- **Performance Optimizations**:
+  - Object-count triggering more predictable and efficient than byte-based approaches
+  - Configurable growth factor allows tuning collection frequency for different workloads
+  - Mark flag reset during sweep prevents persistent marking state between collections
+- **Comprehensive GC Statistics and Logging**:
+  - Collection begin/end logging with clear phase identification
+  - Before/after object counts showing collection effectiveness
+  - Objects collected count providing immediate feedback on memory reclamation
+  - Next collection threshold reporting for performance tuning
+  - Per-object allocation/deallocation logging with memory addresses for debugging
+
+### Changed
+- **Object System Enhanced for GC**:
+  - All objects extended with `is_marked: bool` field for mark phase tracking
+  - Object allocation centralized through `allocateObj()` for consistent GC integration
+  - Object deallocation updated to handle interned string cleanup and count tracking
+  - Object creation methods unified to use common allocation pathway
+- **Heap Management Redesigned**:
+  - `Heap` struct extended with VM pointer, object count, and GC threshold fields
+  - Object count tracking integrated throughout object lifecycle management
+  - GC triggering logic embedded in allocation pathway for automatic collection
+  - String interning cleanup integrated with sweep phase for complete memory management
+- **VM Integration for Root Marking**:
+  - `markRoots()` method added for comprehensive root object identification
+  - Stack, globals, frames, and upvalues all integrated into marking system
+  - VM-heap coupling through `setVm()` enabling bidirectional communication
+  - Collection timing controlled by heap with VM providing marking capability
+- **Build System Extended**:
+  - Three new build options for GC configuration and debugging
+  - Build option names standardized with underscore convention (`gc_stress`, `gc_log`, `gc_grow_factor`)
+  - Default values provided for all options ensuring sensible out-of-box behavior
+- **Memory Management Architecture**:
+  - Object lifecycle fully integrated with garbage collection system
+  - All object types participate in mark-and-sweep cycle with appropriate marking behavior
+  - String interning table maintained consistently with object collection
+  - Memory pressure handling through configurable collection thresholds
+
+### Technical Implementation Details
+- **Mark-and-Sweep Algorithm**: 
+  - Mark phase: VM identifies all reachable objects through comprehensive root traversal
+  - Sweep phase: Heap deallocates all unmarked objects and resets marks for next cycle
+  - Triggering: Object count threshold or stress testing forces collection at allocation time
+- **Root Identification System**:
+  - Stack scanning marks all values currently on VM execution stack
+  - Global variable iteration marks all persistent program values
+  - Call frame traversal marks all values in active function execution contexts
+  - Open upvalue chain traversal marks all closure-captured variables
+- **Object Marking Implementation**:
+  - Recursive marking prevents collection cycles while preserving object references
+  - Type-specific marking ensures all contained objects remain reachable
+  - Mark flag prevents duplicate marking work and infinite recursion
+  - Cross-reference marking maintains object graph integrity
+- **Memory Architecture Benefits**:
+  - Automatic memory management eliminates manual deallocation complexity
+  - Object-count triggering provides predictable collection timing
+  - Configurable thresholds allow workload-specific performance tuning
+  - Comprehensive logging enables debugging and performance analysis
+
+### Integration Quality
+- **Seamless VM Integration**: GC operates transparently during program execution without affecting language semantics
+- **Complete Object Coverage**: All object types (strings, functions, closures, upvalues, natives) properly integrated
+- **Performance Characteristics**: Collection overhead balanced with configurable triggering for optimal throughput
+- **Debug Support**: Comprehensive logging provides visibility into GC behavior and memory usage patterns
+- **Memory Safety**: All object references properly tracked preventing use-after-free and memory leaks
+
+### Testing Verification
+- GC triggering: Object allocation beyond threshold automatically triggers collection
+- Root marking: Stack values, globals, frames, and upvalues correctly preserved through collection cycles
+- Object marking: Functions, closures, and upvalues properly mark their contained references
+- Sweep cleanup: Unreferenced objects automatically deallocated with proper cleanup
+- String interning: Collected strings removed from interning table preventing memory leaks
+- Stress testing: `gc-stress` mode successfully runs programs with collection on every allocation
+- Performance: Configurable growth factor allows tuning collection frequency for different workloads
+- Statistics: GC logging provides accurate counts and timing information for performance analysis
+
 ## [0.25.1] - 2025-08-31
 
 ### Added

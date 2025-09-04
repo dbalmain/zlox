@@ -2,6 +2,8 @@ const std = @import("std");
 const chunk = @import("chunk.zig");
 const value = @import("value.zig");
 const types = @import("types.zig");
+const VM = @import("vm.zig");
+const config = @import("config");
 
 pub const Local = struct {
     name_index: u24,
@@ -37,6 +39,9 @@ pub const Heap = struct {
     interned_strings: std.StringHashMap(*Obj),
     names: std.ArrayList([]const u8),
     name_map: std.StringHashMap(u24),
+    vm: ?*VM.VM,
+    next_gc: usize,
+    obj_count: usize,
 
     pub fn init(allocator: std.mem.Allocator) Heap {
         return Heap{
@@ -45,6 +50,9 @@ pub const Heap = struct {
             .interned_strings = std.StringHashMap(*Obj).init(allocator),
             .names = std.ArrayList([]const u8).init(allocator),
             .name_map = std.StringHashMap(u24).init(allocator),
+            .vm = null,
+            .next_gc = 0,
+            .obj_count = 0,
         };
     }
 
@@ -52,7 +60,7 @@ pub const Heap = struct {
         var obj = self.heap;
         while (obj) |o| {
             obj = o.next;
-            o.deinit(self.allocator);
+            o.deinit(self);
         }
         self.interned_strings.deinit();
         self.names.deinit();
@@ -86,58 +94,104 @@ pub const Heap = struct {
     }
 
     fn makeString(self: *Self, chars: []const u8) !*Obj {
-        const obj = try self.allocator.create(Obj);
-        obj.next = self.heap;
-        self.heap = obj;
-        obj.data = Obj.Data{
+        const obj = try self.allocateObj("string", Obj.Data{
             .string = String{ .chars = chars },
-        };
+        });
         try self.interned_strings.put(chars, obj);
-
         return obj;
     }
 
     pub fn makeFunction(self: *Self, function: Function) !*Obj {
-        const obj = try self.allocator.create(Obj);
-        obj.next = self.heap;
-        self.heap = obj;
-        obj.data = Obj.Data{
+        return self.allocateObj("function", Obj.Data{
             .function = function,
-        };
-
-        return obj;
+        });
     }
 
     pub fn makeClosure(self: *Self, closure: Closure) !*Obj {
-        const obj = try self.allocator.create(Obj);
-        obj.next = self.heap;
-        self.heap = obj;
-        obj.data = Obj.Data{
+        return self.allocateObj("closure", Obj.Data{
             .closure = closure,
-        };
-
-        return obj;
+        });
     }
     pub fn makeUpvalue(self: *Self, location: *value.Value) !*Obj {
-        const obj = try self.allocator.create(Obj);
-        obj.next = self.heap;
-        self.heap = obj;
-        obj.data = Obj.Data{
+        return self.allocateObj("upvalue", Obj.Data{
             .upvalue = ObjUpvalue.init(location),
-        };
-
-        return obj;
+        });
     }
 
     pub fn makeNativeFunction(self: *Self, native_function: NativeFunction) !*Obj {
-        const obj = try self.allocator.create(Obj);
-        obj.next = self.heap;
-        self.heap = obj;
-        obj.data = Obj.Data{
+        return self.allocateObj("native_function", Obj.Data{
             .native_function = native_function,
-        };
+        });
+    }
 
+    fn allocateObj(self: *Self, obj_type: []const u8, data: Obj.Data) !*Obj {
+        if (config.gc_stress or self.obj_count == self.next_gc) {
+            self.collectGarbage();
+            self.next_gc = self.obj_count * config.gc_grow_factor;
+        }
+        const obj = try self.allocator.create(Obj);
+
+        if (config.gc_log) {
+            std.debug.print("{*} allocate {} for {s}\n", .{ obj, @sizeOf(Obj), obj_type });
+        }
+
+        obj.next = self.heap;
+        obj.is_marked = false;
+        self.heap;
+        obj.data = data;
+        self.obj_count += 1;
         return obj;
+    }
+
+    pub fn setVm(self: *Self, vm: *VM.VM) void {
+        self.vm = vm;
+        self.next_gc = self.obj_count * config.gc_grow_factor;
+    }
+
+    fn collectGarbage(self: *Self) void {
+        // we don't start collecting garbage until the VM provides a `markRoots` function
+        if (self.vm) |vm| {
+            if (config.gc_log) {
+                std.debug.print("-- gc begin\n", .{});
+            }
+
+            vm.markRoots();
+            const before = self.obj_count;
+            self.sweep();
+
+            if (config.gc_log) {
+                std.debug.print("-- gc end\n", .{});
+                std.debug.print("   collected {d} objects (from {d} to {d}). Next at {d}\n", .{
+                    before - self.obj_count,
+                    before,
+                    self.obj_count,
+                    self.next_gc,
+                });
+            }
+        }
+    }
+
+    fn sweep(self: *Self) void {
+        var obj_ptr = &self.heap;
+        while (obj_ptr.*) |obj| {
+            if (obj.is_marked) {
+                obj.is_marked = false;
+                obj_ptr = &obj.next;
+            } else {
+                obj_ptr.* = obj.next;
+                obj.deinit(self);
+            }
+        }
+    }
+
+    fn printObjectAddresses(self: *Self) void {
+        var i: usize = 0;
+        var maybe_obj = self.heap;
+        while (maybe_obj) |obj| {
+            std.debug.print("{d}:{*}\n", .{ i, obj });
+            maybe_obj = obj.next;
+            i += 1;
+        }
     }
 };
 
@@ -149,6 +203,7 @@ pub const Obj = struct {
     const Self = @This();
     data: Data,
     next: ?*Obj,
+    is_marked: bool,
 
     const Data = union(enum) {
         string: String,
@@ -165,7 +220,7 @@ pub const Obj = struct {
             .native_function => try writer.print("<native fn>", .{}),
             // .function => |f| try writer.print("<fn {s}:{d}>", .{ f.name(), f.arity }),
             // .native_function => |f| try writer.print("<nfn {s}:{d}>", .{ f.name, f.arity }),
-            .closure => |c| try writer.print("<fn {s}>", .{c.function.name()}),
+            .closure => |c| try writer.print("<fn {s}>", .{c.fun().name()}),
             .upvalue => try writer.print("upvalue", .{}),
         }
     }
@@ -212,15 +267,32 @@ pub const Obj = struct {
         };
     }
 
-    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Self, heap: *Heap) void {
+        if (config.gc_log) {
+            const obj_type = switch (self.*.data) {
+                .string => "string",
+                .function => "function",
+                .closure => "closure",
+                .upvalue => "upvalue",
+                .native_function => "native_function",
+            };
+            std.debug.print("{*} free type {s} ", .{ self, obj_type });
+            self.print(std.io.getStdErr().writer()) catch {};
+            std.debug.print("\n", .{});
+        }
+
         switch (self.*.data) {
-            .string => |*s| s.deinit(allocator),
+            .string => |*s| {
+                _ = heap.interned_strings.remove(s.chars);
+                s.deinit(heap.allocator);
+            },
             .function => |*f| f.deinit(),
             .native_function => |*n| n.deinit(),
             .closure => |*c| c.deinit(),
             .upvalue => {},
         }
-        allocator.destroy(self);
+        heap.allocator.destroy(self);
+        heap.obj_count -= 1;
     }
 
     pub fn equals(self: *const Self, other: *const Self) bool {
@@ -235,6 +307,30 @@ pub const Obj = struct {
                 ObjError.TypeMismatch,
             else => ObjError.TypeMismatch,
         };
+    }
+
+    pub fn mark(self: *Self) void {
+        if (!self.is_marked) {
+            if (config.gc_log) {
+                const obj_type = switch (self.*.data) {
+                    .string => "string",
+                    .function => "function",
+                    .closure => "closure",
+                    .upvalue => "upvalue",
+                    .native_function => "native_function",
+                };
+                std.debug.print("{x} mark {s} ", .{ @intFromPtr(self), obj_type });
+                self.print(std.io.getStdErr().writer()) catch {};
+                std.debug.print("\n", .{});
+            }
+            self.is_marked = true;
+            switch (self.*.data) {
+                .closure => |*c| c.mark(),
+                .upvalue => |*u| u.mark(),
+                .function => |*f| f.mark(),
+                else => {},
+            }
+        }
     }
 };
 
@@ -291,6 +387,10 @@ pub const Function = struct {
             .heap = heap,
             .enclosing = enclosing,
         };
+    }
+
+    pub fn mark(self: *Self) void {
+        for (self.chunk.constants.values.items) |*v| v.mark();
     }
 
     pub fn name(self: *const Self) []const u8 {
@@ -373,20 +473,29 @@ pub const NativeFunction = struct {
 
 pub const Closure = struct {
     const Self = @This();
-    function: Function,
+    function: *Obj,
     slots: []*Obj,
     heap: *Heap,
 
-    pub fn init(function: Function, heap: *Heap) !Self {
+    pub fn init(function: *Obj, heap: *Heap) !Self {
         return Self{
             .function = function,
-            .slots = try heap.allocator.alloc(*Obj, function.upvalue_top),
+            .slots = try heap.allocator.alloc(*Obj, function.data.function.upvalue_top),
             .heap = heap,
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    fn deinit(self: *Self) void {
         self.heap.allocator.free(self.slots);
+    }
+
+    pub fn fun(self: *const Self) *Function {
+        return &self.function.data.function;
+    }
+
+    fn mark(self: *Self) void {
+        self.function.mark();
+        for (self.slots) |slot| slot.mark();
     }
 };
 
@@ -402,5 +511,9 @@ const ObjUpvalue = struct {
             .next = null,
             .closed = value.nil_val,
         };
+    }
+
+    fn mark(self: *Self) void {
+        self.location.mark();
     }
 };
