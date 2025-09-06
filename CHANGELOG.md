@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2025-09-06
+
+### Added
+- Chapter 27 - Classes and Instances implementation with complete object-oriented programming system
+- **Class declarations**: First-class class objects with name resolution and proper scoping
+- **Instance creation**: Runtime instance creation with class constructor calls 
+- **Property access**: Dynamic property get/set operations with `instance.property` syntax
+- **Property cache optimization**: Single-property cache per instance for improved repeated access performance
+  - Cache uses `maxInt(u24)` as invalid marker for both hits and misses
+  - Significant performance improvement for property-heavy code without memory overhead
+  - Cache invalidated and updated on property set operations
+- **Runtime type safety**: Proper error handling for property access on non-instance values
+- New OpCodes: `Class`, `ClassLong`, `GetProperty`, `GetPropertyLong`, `SetProperty`, `SetPropertyLong`
+- Enhanced object system with `Class` and `Instance` types for OOP support
+- VM integration with class creation and instance property operations
+- Comprehensive property management with dynamic field storage using AutoHashMap
+- Memory management integration with GC marking for classes, instances, and their properties
+
+### Changed
+- Object system extended with class and instance types for complete OOP support
+- VM execution enhanced with class creation and property access operations
+- Compiler enhanced with class declaration parsing and property operation compilation
+- Debug output extended with class and property instruction disassembly
+
+### Technical Implementation Details
+- **Class System**: First-class class objects with name binding and proper scoping semantics
+- **Instance System**: Runtime instance creation with dynamic property storage using AutoHashMap
+- **Property Cache**: Single-property cache per instance using `last_name_index` and `last_value` fields
+- **Memory Integration**: GC marking support for all class and instance objects and their properties
+- **Performance Optimization**: Property cache provides significant speed improvement for repeated access patterns
+
+### Integration Quality
+- **Seamless VM Integration**: Classes and instances integrate perfectly with existing object system and garbage collection
+- **Complete OOP Support**: Full object-oriented programming capabilities with classes, instances, and properties
+- **Performance Characteristics**: Property cache optimization provides measurable performance improvements
+- **Memory Safety**: All class and instance operations properly integrated with garbage collection system
+
+### Testing Verification
+- Class declarations: `class TestClass {}` creates proper class objects with name binding
+- Instance creation: `var instance = TestClass();` creates instances with proper class references
+- Property access: `instance.property = value; print instance.property;` works with dynamic properties
+- Property cache: Repeated property access shows performance improvements via caching
+- Memory management: Classes and instances properly marked and collected by garbage collector
+- Error handling: Property access on non-instance values produces proper runtime errors
+
 ## [0.26.0] - 2025-09-04
 
 ### Added

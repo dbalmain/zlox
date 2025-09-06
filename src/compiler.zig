@@ -47,7 +47,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .LeftBrace => ParseRule.init(null, null, .None),
         .RightBrace => ParseRule.init(null, null, .None),
         .Comma => ParseRule.init(null, null, .None),
-        .Dot => ParseRule.init(null, null, .None),
+        .Dot => ParseRule.init(null, dot, .Call),
         .Minus => ParseRule.init(unary, binary, .Term),
         .Plus => ParseRule.init(null, binary, .Term),
         .Colon => ParseRule.init(null, null, .None),
@@ -308,6 +308,8 @@ const Compiler = struct {
             try self.varDeclaration();
         } else if (self.match(.Fun)) {
             try self.funDeclaration();
+        } else if (self.match(.Class)) {
+            try self.classDeclaration();
         } else {
             try self.statement();
         }
@@ -315,7 +317,7 @@ const Compiler = struct {
     }
 
     fn varDeclaration(self: *Self) CompileError!void {
-        const global = try self.parseVariable("Expect variable name.");
+        const name = try self.parseVariable("Expect variable name.");
 
         if (self.match(.Equal)) {
             try self.expression();
@@ -324,14 +326,23 @@ const Compiler = struct {
         }
         self.consume(.Semicolon, "Expect ';' after variable declaration.");
 
-        try self.defineVariable(global);
+        try self.defineVariable(name);
     }
 
     fn funDeclaration(self: *Self) CompileError!void {
-        const global = try self.parseVariable("Expect function name.");
+        const name = try self.parseVariable("Expect function name.");
         self.markInitialised();
-        try self.function(.Function, global);
-        try self.defineVariable(global);
+        try self.function(.Function, name);
+        try self.defineVariable(name);
+    }
+
+    fn classDeclaration(self: *Self) CompileError!void {
+        const name = try self.parseVariable("Expect class name.");
+        self.fun.chunk.defineClass(name, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+        try self.defineVariable(name);
+        self.consume(.LeftBrace, "Expect '{' before class body.");
+        self.consume(.RightBrace, "Expect '}' after class body.");
     }
 
     fn function(self: *Self, function_type: object.FunctionType, name: u24) CompileError!void {
@@ -693,6 +704,16 @@ const Compiler = struct {
             return CompileError.OutOfMemory;
     }
 
+    fn setProperty(self: *Self, index: u24) CompileError!void {
+        self.fun.chunk.setProperty(index, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+    }
+
+    fn getProperty(self: *Self, index: u24) CompileError!void {
+        self.fun.chunk.getProperty(index, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+    }
+
     fn argumentList(self: *Self) CompileError!u8 {
         var arg_count: u8 = 0;
         if (!self.check(.RightParen)) {
@@ -820,6 +841,17 @@ fn or_(c: *Compiler) CompileError!void {
     try c.emitCode(.Pop);
     try c.parsePrecedence(.Or);
     try c.patchJump(orJump);
+}
+
+fn dot(c: *Compiler) CompileError!void {
+    c.consume(.Identifier, "Expect property name after '.'.");
+    const name = try c.makeIdentifier(&c.parser.previous);
+    if (c.can_assign and c.match(.Equal)) {
+        try c.expression();
+        try c.setProperty(name);
+    } else {
+        try c.getProperty(name);
+    }
 }
 
 pub fn compile(heap: *object.Heap, source: []const u8) CompileError!object.Function {

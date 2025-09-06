@@ -178,6 +178,10 @@ pub const VM = struct {
                 .SetGlobalLong => try self.setGlobalVar(frame.readU24()),
                 .GetGlobal => try self.getGlobalVar(frame.readByte()),
                 .GetGlobalLong => try self.getGlobalVar(frame.readU24()),
+                .SetProperty => try self.setPropertyVar(frame.readByte()),
+                .SetPropertyLong => try self.setPropertyVar(frame.readU24()),
+                .GetProperty => try self.getPropertyVar(frame.readByte()),
+                .GetPropertyLong => try self.getPropertyVar(frame.readU24()),
                 .GetLocal => self.push(frame.slots[frame.readByte()]),
                 .SetLocal => frame.slots[frame.readByte()] = self.peek(0).*,
                 .Nil => self.push(value.nil_val),
@@ -278,7 +282,12 @@ pub const VM = struct {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);
                     _ = try self.pop();
                 },
-                .Class => {},
+                .Class => {
+                    self.push(value.asObject(try self.heap.makeClass(@intCast(frame.readByte()))));
+                },
+                .ClassLong => {
+                    self.push(value.asObject(try self.heap.makeClass(frame.readU24())));
+                },
                 .Fun => {},
                 .Var => {},
             }
@@ -300,8 +309,13 @@ pub const VM = struct {
     fn callValue(self: *Self, callee: *value.Value, arg_count: u8) !void {
         if (callee.withObject()) |obj| {
             switch (obj.*.data) {
-                .function => |*fun| return self.call(Callable{ .function = fun }, arg_count),
+                .class => |*class| {
+                    self.stack[self.stack_top - arg_count - 1] =
+                        value.asObject(try self.heap.makeInstance(class));
+                    return;
+                },
                 .closure => |*closure| return self.call(Callable{ .closure = closure }, arg_count),
+                .function => |*fun| return self.call(Callable{ .function = fun }, arg_count),
                 .native_function => |*fun| return self.nativeCall(fun, arg_count),
                 else => {},
             }
@@ -415,27 +429,51 @@ pub const VM = struct {
         return &self.stack[self.stack_top - 1 - distance];
     }
 
-    fn defineGlobalVar(self: *Self, index: u24) !void {
+    fn defineGlobalVar(self: *Self, name: u24) !void {
         // Check for redeclaration - not done by clox
         // if (self.globals.contains(index)) {
         //     return self.runtimeError("Variable '{s}' already declared.", .{self.heap.names.items[index]});
         // }
         // don't pop before adding the value to the table to prevent garbage collection
-        try self.globals.put(index, self.peek(0).*);
+        try self.globals.put(name, self.peek(0).*);
         _ = try self.pop();
     }
 
-    fn setGlobalVar(self: *Self, index: u24) !void {
-        const previous = try self.globals.fetchPut(index, self.peek(0).*);
+    fn setGlobalVar(self: *Self, name: u24) !void {
+        const previous = try self.globals.fetchPut(name, self.peek(0).*);
         if (previous == null) {
-            _ = self.globals.remove(index);
-            return self.runtimeError("Undefined variable '{s}'.", .{self.heap.names.items[index]});
+            _ = self.globals.remove(name);
+            return self.runtimeError("Undefined variable '{s}'.", .{self.heap.names.items[name]});
         }
     }
 
-    fn getGlobalVar(self: *Self, index: u24) !void {
-        self.push(self.globals.get(index) orelse
-            return self.runtimeError("Undefined variable '{s}'.", .{self.heap.names.items[index]}));
+    fn getGlobalVar(self: *Self, name: u24) !void {
+        self.push(self.globals.get(name) orelse
+            return self.runtimeError("Undefined variable '{s}'.", .{self.heap.names.items[name]}));
+    }
+
+    fn setPropertyVar(self: *Self, name: u24) !void {
+        if (self.peek(1).withInstance()) |instance| {
+            try instance.setProperty(name, self.peek(0).*);
+            const val = try self.pop();
+            _ = try self.pop();
+            self.push(val);
+        } else {
+            return self.runtimeError("Only instances have fields.", .{});
+        }
+    }
+
+    fn getPropertyVar(self: *Self, name: u24) !void {
+        if (self.peek(0).withInstance()) |instance| {
+            if (instance.getProperty(name)) |val| {
+                _ = try self.pop();
+                self.push(val);
+            } else {
+                return self.runtimeError("Undefined property '{s}'.", .{self.heap.names.items[name]});
+            }
+        } else {
+            return self.runtimeError("Only instances have properties.", .{});
+        }
     }
 
     fn runtimeError(self: *Self, comptime fmt: []const u8, args: anytype) InterpreterError {

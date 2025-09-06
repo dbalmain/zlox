@@ -98,6 +98,16 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn withInstance(self: *const Self) ?*object.Instance {
+        return switch (self.*) {
+            .obj => |o| switch (o.data) {
+                .instance => |*i| i,
+                else => null,
+            },
+            else => null,
+        };
+    }
+
     pub fn asStringChars(self: *const Self) []const u8 {
         switch (self.*) {
             .obj => |o| switch (o.data) {

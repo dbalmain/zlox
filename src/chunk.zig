@@ -11,6 +11,10 @@ pub const OpCode = enum(u8) {
     GetGlobalLong,
     SetGlobal,
     SetGlobalLong,
+    SetProperty,
+    SetPropertyLong,
+    GetProperty,
+    GetPropertyLong,
     SetLocal,
     GetLocal,
     Nil,
@@ -22,6 +26,8 @@ pub const OpCode = enum(u8) {
     CloseUpvalue,
     Closure,
     ClosureLong,
+    Class,
+    ClassLong,
     Equal,
     Matches,
     Greater,
@@ -32,7 +38,6 @@ pub const OpCode = enum(u8) {
     Divide,
     Not,
     Negate,
-    Class,
     Fun,
     Var,
     Print,
@@ -119,12 +124,24 @@ pub const Chunk = struct {
         try self.writeMaybeLongArg(index, line, .DefineGlobal, .DefineGlobalLong);
     }
 
+    pub fn defineClass(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .Class, .ClassLong);
+    }
+
     pub fn getGlobal(self: *Self, index: u24, line: u24) !void {
         try self.writeMaybeLongArg(index, line, .GetGlobal, .GetGlobalLong);
     }
 
     pub fn setGlobal(self: *Self, index: u24, line: u24) !void {
         try self.writeMaybeLongArg(index, line, .SetGlobal, .SetGlobalLong);
+    }
+
+    pub fn getProperty(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .GetProperty, .GetPropertyLong);
+    }
+
+    pub fn setProperty(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .SetProperty, .SetPropertyLong);
     }
 
     pub fn getLine(self: *const Self, offset: u24) u24 {

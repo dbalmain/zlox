@@ -14,6 +14,22 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
+- **Chapter 27**: Classes and Instances - ✅ Complete (with Performance Optimization)
+  - Complete object-oriented programming system with classes and instances
+  - **Class declarations**: First-class class objects with name resolution and proper scoping
+  - **Instance creation**: Runtime instance creation with class constructor calls 
+  - **Property access**: Dynamic property get/set operations with `instance.property` syntax
+  - **Property cache optimization**: Single-property cache per instance for improved repeated access performance
+    - Cache uses `maxInt(u24)` as invalid marker for both hits and misses
+    - Significant performance improvement for property-heavy code without memory overhead
+    - Cache invalidated and updated on property set operations
+  - **Runtime type safety**: Proper error handling for property access on non-instance values
+  - New OpCodes: `Class`, `ClassLong`, `GetProperty`, `GetPropertyLong`, `SetProperty`, `SetPropertyLong`
+  - Enhanced object system with `Class` and `Instance` types for OOP support
+  - VM integration with class creation and instance property operations
+  - Comprehensive property management with dynamic field storage using AutoHashMap
+  - Memory management integration with GC marking for classes, instances, and their properties
+
 - **Chapter 26**: Garbage Collection - ✅ Complete 
   - Complete mark-and-sweep garbage collection system with automatic memory management
   - **Object-count based GC triggering**: Collection activates when object count reaches threshold or under gc-stress mode

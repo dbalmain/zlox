@@ -124,6 +124,18 @@ pub const Heap = struct {
         });
     }
 
+    pub fn makeClass(self: *Self, name: u24) !*Obj {
+        return self.allocateObj("class", Obj.Data{
+            .class = Class.init(name, self),
+        });
+    }
+
+    pub fn makeInstance(self: *Self, class: *Class) !*Obj {
+        return self.allocateObj("instance", Obj.Data{
+            .instance = Instance.init(class, self),
+        });
+    }
+
     fn allocateObj(self: *Self, obj_type: []const u8, data: Obj.Data) !*Obj {
         if (config.gc_stress or self.obj_count == self.next_gc) {
             self.collectGarbage();
@@ -211,84 +223,95 @@ pub const Obj = struct {
         native_function: NativeFunction,
         closure: Closure,
         upvalue: ObjUpvalue,
+        class: Class,
+        instance: Instance,
     };
 
     pub fn print(self: *Self, writer: anytype) !void {
-        switch (self.*.data) {
-            .string => |s| try writer.print("{s}", .{s.chars}),
+        switch (self.data) {
+            .class => |c| try writer.print("{s}", .{c.name()}),
+            .closure => |c| try writer.print("<fn {s}>", .{c.fun().name()}),
             .function => |f| try writer.print("<fn {s}>", .{f.name()}),
+            .instance => |i| try writer.print("{s} instance", .{i.class.name()}),
             .native_function => try writer.print("<native fn>", .{}),
+            .string => |s| try writer.print("{s}", .{s.chars}),
+            .upvalue => try writer.print("upvalue", .{}),
             // .function => |f| try writer.print("<fn {s}:{d}>", .{ f.name(), f.arity }),
             // .native_function => |f| try writer.print("<nfn {s}:{d}>", .{ f.name, f.arity }),
-            .closure => |c| try writer.print("<fn {s}>", .{c.fun().name()}),
-            .upvalue => try writer.print("upvalue", .{}),
         }
     }
 
     pub fn isString(self: *const Self) bool {
-        return switch (self.*.data) {
+        return switch (self.data) {
             .string => true,
             else => false,
         };
     }
 
     pub fn isFunction(self: *const Self) bool {
-        return switch (self.*.data) {
+        return switch (self.data) {
             .function => true,
             else => false,
         };
     }
 
     pub fn isClosure(self: *const Self) bool {
-        return switch (self.*.data) {
+        return switch (self.data) {
             .closure => true,
             else => false,
         };
     }
 
     pub fn withString(self: *const Self) ?*const String {
-        return switch (self.*.data) {
+        return switch (self.data) {
             .string => |*s| s,
             else => null,
         };
     }
 
     pub fn withFunction(self: *const Self) ?*const Function {
-        return switch (self.*.data) {
+        return switch (self.data) {
             .function => |*f| f,
             else => null,
         };
     }
 
     pub fn withClosure(self: *const Self) ?*const Closure {
-        return switch (self.*.data) {
+        return switch (self.data) {
             .closure => |*c| c,
             else => null,
         };
     }
 
+    fn objType(self: *Self) []const u8 {
+        return switch (self.data) {
+            .class => "class",
+            .closure => "closure",
+            .function => "function",
+            .instance => "instance",
+            .native_function => "native_function",
+            .string => "string",
+            .upvalue => "upvalue",
+        };
+    }
+
     pub fn deinit(self: *Self, heap: *Heap) void {
         if (config.gc_log) {
-            const obj_type = switch (self.*.data) {
-                .string => "string",
-                .function => "function",
-                .closure => "closure",
-                .upvalue => "upvalue",
-                .native_function => "native_function",
-            };
-            std.debug.print("{*} free type {s} ", .{ self, obj_type });
+            std.debug.print("{*} free type {s} ", .{ self, self.objType() });
             self.print(std.io.getStdErr().writer()) catch {};
             std.debug.print("\n", .{});
         }
 
-        switch (self.*.data) {
+        switch (self.data) {
+            .class => |*c| c.deinit(),
+            .closure => |*c| c.deinit(),
+            .function => |*f| f.deinit(),
+            .instance => |*i| i.deinit(),
+            .native_function => |*n| n.deinit(),
             .string => |*s| {
                 _ = heap.interned_strings.remove(s.chars);
                 s.deinit(heap.allocator);
             },
-            .function => |*f| f.deinit(),
-            .native_function => |*n| n.deinit(),
-            .closure => |*c| c.deinit(),
             .upvalue => {},
         }
         heap.allocator.destroy(self);
@@ -300,7 +323,7 @@ pub const Obj = struct {
     }
 
     pub fn add(self: *const Self, heap: *Heap, other: *const Self) !*Self {
-        return switch (self.*.data) {
+        return switch (self.data) {
             .string => |s| if (other.withString()) |o|
                 heap.takeString(try std.mem.concat(heap.allocator, u8, &.{ s.chars, o.chars }))
             else
@@ -312,22 +335,17 @@ pub const Obj = struct {
     pub fn mark(self: *Self) void {
         if (!self.is_marked) {
             if (config.gc_log) {
-                const obj_type = switch (self.*.data) {
-                    .string => "string",
-                    .function => "function",
-                    .closure => "closure",
-                    .upvalue => "upvalue",
-                    .native_function => "native_function",
-                };
-                std.debug.print("{x} mark {s} ", .{ @intFromPtr(self), obj_type });
+                std.debug.print("{x} mark {s} ", .{ @intFromPtr(self), self.objType() });
                 self.print(std.io.getStdErr().writer()) catch {};
                 std.debug.print("\n", .{});
             }
             self.is_marked = true;
-            switch (self.*.data) {
+            switch (self.data) {
+                .class => |*c| c.mark(),
+                .instance => |*i| i.mark(),
                 .closure => |*c| c.mark(),
-                .upvalue => |*u| u.mark(),
                 .function => |*f| f.mark(),
+                .upvalue => |*u| u.mark(),
                 else => {},
             }
         }
@@ -515,5 +533,78 @@ const ObjUpvalue = struct {
 
     fn mark(self: *Self) void {
         self.location.mark();
+    }
+};
+
+const Class = struct {
+    const Self = @This();
+    name_index: u24,
+    heap: *Heap,
+
+    fn init(name_index: u24, heap: *Heap) Self {
+        return Self{
+            .name_index = name_index,
+            .heap = heap,
+        };
+    }
+
+    pub fn name(self: *const Self) []const u8 {
+        return self.heap.names.items[self.name_index];
+    }
+
+    fn mark(self: *Self) void {
+        _ = self;
+    }
+
+    fn deinit(self: *Self) void {
+        _ = self;
+    }
+};
+
+pub const Instance = struct {
+    const Self = @This();
+    class: *Class,
+    fields: std.AutoHashMap(u24, value.Value),
+    cached_property: u24,
+
+    fn init(class: *Class, heap: *Heap) Self {
+        return Self{
+            .class = class,
+            .fields = std.AutoHashMap(u24, value.Value).init(heap.allocator),
+            .cached_property = std.math.maxInt(u24), // Invalid initial value
+        };
+    }
+
+    fn mark(self: *Self) void {
+        var field_iterator = self.fields.iterator();
+        while (field_iterator.next()) |entry| entry.value_ptr.mark();
+        self.class.mark();
+    }
+
+    fn deinit(self: *Self) void {
+        self.fields.deinit();
+    }
+
+    pub fn getProperty(self: *Self, name: u24) ?value.Value {
+        // Check cache first
+        if (self.cached_property == name) {
+            return self.fields.get(name);
+        }
+        
+        // Slow path - do lookup and update cache
+        if (self.fields.get(name)) |val| {
+            self.cached_property = name;
+            return val;
+        } else {
+            // Cache the miss too
+            self.cached_property = name;
+            return null;
+        }
+    }
+
+    pub fn setProperty(self: *Self, name: u24, val: value.Value) !void {
+        try self.fields.put(name, val);
+        // Update cache on set
+        self.cached_property = name;
     }
 };
