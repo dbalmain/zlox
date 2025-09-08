@@ -11,7 +11,8 @@
       "Bash(./run-tests)",
       "Bash(./clox test/operator/add_bool_num.lox)",
       "Bash(./zlox:*)",
-      "Bash(./clox:*)"
+      "Bash(./clox:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }

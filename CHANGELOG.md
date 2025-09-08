@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2025-09-08
+
+### Added
+- Chapter 28 - Methods and Initializers implementation with complete method system for classes
+- **Method declarations**: Methods defined within class bodies with proper name resolution and storage in Class.methods HashMap
+- **Method binding**: Runtime method binding creating BoundMethod objects for `this` context preservation during method calls
+- **Method invocation**: Direct method calls on instances with `instance.method()` syntax supporting argument passing
+- **Constructor support**: Special `init` methods for object initialization with automatic instance return handling
+- **`this` keyword**: Implicit `this` parameter in methods providing access to instance state and fields
+- **Invoke optimization**: Direct method invocation bypassing intermediate bound method creation for performance
+  - OpCodes: `Invoke`, `InvokeLong` for optimized method calls with argument count encoding
+  - Performance improvement by checking methods before fields in property access operations
+  - Fallback to traditional property access for non-method calls maintaining compatibility
+- **Method storage**: Class methods stored in AutoHashMap for efficient O(1) lookup and inheritance preparation
+- **Constructor semantics**: `init` methods automatically return instance object, other methods return `nil` by default
+- **Runtime type safety**: Proper error handling for method calls on non-instance values with descriptive error messages
+- New OpCodes: `Method`, `MethodLong` for method definition and storage within class objects
+- Enhanced object system with `BoundMethod` type for method binding and `INIT` constant (value 1) for constructor recognition
+- VM integration with method binding, invocation, and constructor calling during class instantiation process
+- Memory management integration with GC marking for bound methods and method storage in classes
+
+### Changed
+- Object system extended with BoundMethod type containing method reference and bound instance for `this` context
+- Class system enhanced with methods HashMap for storing and retrieving class methods by name
+- VM execution enhanced with method binding, invocation, and optimized invoke operations
+- Compiler enhanced with method parsing within class bodies and `this` keyword support in method contexts
+- Function compilation extended with Method and Initialiser types for proper method compilation and `this` slot reservation
+- Property access operations reordered to check methods before fields for invoke optimization performance
+- Debug output extended with method and invoke instruction disassembly for debugging method calls
+
+### Technical Implementation Details
+- **Method System**: Methods stored in Class.methods HashMap with string keys and Function object values
+- **Binding Mechanism**: BoundMethod objects created dynamically during method access preserving instance context
+- **Invoke Optimization**: Direct method calls bypass bound method creation when possible for improved performance
+- **Constructor Handling**: `init` methods identified by INIT constant (1) with special return behavior
+- **`this` Context**: Method compilation reserves slot 0 for `this` parameter enabling instance access
+- **Memory Integration**: All method objects and bindings properly integrated with garbage collection marking
+
+### Integration Quality
+- **Seamless OOP Integration**: Methods integrate perfectly with existing class and instance systems
+- **Performance Characteristics**: Invoke optimization provides measurable performance improvements for method calls
+- **Memory Safety**: All method objects and bindings properly integrated with garbage collection system
+- **Complete Method Support**: Full method functionality including constructors, instance methods, and `this` binding
+
+### Testing Verification
+- Method declarations: `class TestClass { method() { print "hello"; } }` creates methods in class objects
+- Method invocation: `var instance = TestClass(); instance.method();` calls methods with proper `this` binding
+- Constructor support: `class TestClass { init(value) { this.field = value; } }` initializes instances correctly
+- `this` keyword: Methods access and modify instance state through `this` parameter
+- Invoke optimization: Method calls execute efficiently with optimized invoke operations
+- Memory management: Methods and bound methods properly marked and collected by garbage collector
+- Error handling: Method calls on non-instance values produce proper runtime errors
+
 ## [0.27.0] - 2025-09-06
 
 ### Added

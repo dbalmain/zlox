@@ -31,35 +31,42 @@ pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?us
     switch (instruction) {
         .Constant => return constantInstruction(self, offset, instruction),
         .ConstantLong => return constantLongInstruction(self, offset, instruction),
-        .DefineGlobal,
-        .SetGlobal,
-        .GetGlobal,
-        .SetProperty,
-        .GetProperty,
         .Class,
+        .DefineGlobal,
+        .GetGlobal,
+        .GetProperty,
+        .Invoke,
+        .Method,
+        .SetGlobal,
+        .SetProperty,
         => return globalVariableInstruction(self, offset, instruction),
-        .DefineGlobalLong,
-        .SetGlobalLong,
-        .GetGlobalLong,
-        .SetPropertyLong,
-        .GetPropertyLong,
         .ClassLong,
+        .DefineGlobalLong,
+        .GetGlobalLong,
+        .GetPropertyLong,
+        .MethodLong,
+        .SetGlobalLong,
+        .SetPropertyLong,
         => return globalVariableLongInstruction(self, offset, instruction),
-        .SetLocal,
-        .GetLocal,
-        .SetUpvalue,
-        .GetUpvalue,
         .Call,
+        .GetLocal,
+        .GetUpvalue,
+        .SetLocal,
+        .SetUpvalue,
         => return variableInstruction(self, offset, instruction),
         .Break,
-        .Loop,
         .Jump,
         .JumpIfFalse,
+        .Loop,
         => return shortVariableInstruction(self, offset, instruction),
         .Closure,
         => return closureInstruction(self, offset, false),
         .ClosureLong,
         => return closureInstruction(self, offset, true),
+        .Invoke,
+        => return invokeInstruction(self, offset, false),
+        .InvokeLong,
+        => return invokeInstruction(self, offset, true),
         else => return simpleInstruction(instruction, offset),
     }
 }
@@ -143,4 +150,27 @@ fn closureInstruction(self: *const chunk.Chunk, start_offset: usize, is_long: bo
     }
 
     return offset;
+}
+
+fn invokeInstruction(self: *const chunk.Chunk, start_offset: usize, is_long: bool) !usize {
+    var offset = start_offset;
+    var constant: u24 = undefined;
+    if (is_long) {
+        constant = @as(u24, self.code.items[offset + 1]) |
+            (@as(u24, self.code.items[offset + 2]) << 8) |
+            (@as(u24, self.code.items[offset + 3]) << 16);
+        offset += 4;
+    } else {
+        constant = @intCast(self.code.items[offset + 1]);
+        offset += 2;
+    }
+    const arg_count = self.code.items[offset];
+
+    std.debug.print("{s:<18} ({d} args) {d:>4} \n", .{
+        @tagName(chunk.OpCode.Closure),
+        arg_count,
+        constant,
+    });
+
+    return offset + 1;
 }

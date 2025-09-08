@@ -7,6 +7,8 @@ const debug = @import("debug.zig");
 const config = @import("config");
 const types = @import("types.zig");
 
+const SCRIPT_NAME = "<script>";
+
 const Precedence = enum {
     None,
     Assignment, // =
@@ -82,7 +84,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .Return => ParseRule.init(null, null, .None),
         .Super => ParseRule.init(null, null, .None),
         .Switch => ParseRule.init(null, null, .None),
-        .This => ParseRule.init(null, null, .None),
+        .This => ParseRule.init(this, null, .None),
         .True => ParseRule.init(literal, null, .None),
         .Var => ParseRule.init(null, null, .None),
         .While => ParseRule.init(null, null, .None),
@@ -105,7 +107,9 @@ const Parser = struct {
     }
 };
 
-const SCRIPT_NAME = "<script>";
+const ClassCompiler = struct {
+    enclosing: ?*ClassCompiler,
+};
 
 const Compiler = struct {
     const Self = @This();
@@ -119,6 +123,7 @@ const Compiler = struct {
     parser: Parser,
     scanner: scanner.Scanner,
     scope_depth: u7,
+    current_class: ?*ClassCompiler,
 
     fn init(
         heap: *object.Heap,
@@ -137,6 +142,7 @@ const Compiler = struct {
             .parser = Parser.init(),
             .scanner = scanner.Scanner.init(source),
             .scope_depth = 0,
+            .current_class = null,
         };
     }
 
@@ -237,7 +243,11 @@ const Compiler = struct {
     }
 
     fn emitReturn(self: *Self) CompileError!void {
-        try self.emitCode(.Nil);
+        if (self.fun.function_type == .Initialiser) {
+            try self.emitCodeAndByte(.GetLocal, 0);
+        } else {
+            try self.emitCode(.Nil);
+        }
         try self.emitCode(.Return);
     }
 
@@ -341,8 +351,27 @@ const Compiler = struct {
         self.fun.chunk.defineClass(name, self.parser.previous.line) catch
             return CompileError.OutOfMemory;
         try self.defineVariable(name);
+        var class_compiler = ClassCompiler{
+            .enclosing = self.current_class,
+        };
+        self.current_class = &class_compiler;
+        try self.namedVariable(name);
         self.consume(.LeftBrace, "Expect '{' before class body.");
+        while (!self.check(.RightBrace) and !self.check(.Eof)) {
+            try self.method();
+        }
         self.consume(.RightBrace, "Expect '}' after class body.");
+        try self.emitCode(.Pop);
+
+        self.current_class = self.current_class.?.enclosing;
+    }
+
+    fn method(self: *Self) CompileError!void {
+        self.consume(.Identifier, "Expect method name.");
+        const name = try self.makeIdentifier(&self.parser.previous);
+        try self.function(if (name == object.INIT) .Initialiser else .Method, name);
+        self.fun.chunk.defineMethod(name, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
     }
 
     fn function(self: *Self, function_type: object.FunctionType, name: u24) CompileError!void {
@@ -555,6 +584,10 @@ const Compiler = struct {
         if (self.match(.Semicolon)) {
             try self.emitReturn();
         } else {
+            if (self.fun.function_type == .Initialiser) {
+                self.compileError("Can't return a value from an initializer.");
+            }
+
             try self.expression();
             self.consume(.Semicolon, "Expect ';' after return value.");
             try self.emitCode(.Return);
@@ -665,31 +698,30 @@ const Compiler = struct {
         return self.heap.makeIdentifier(name) catch CompileError.OutOfMemory;
     }
 
-    fn namedVariable(self: *Self, name: *scanner.Token) CompileError!void {
-        const index = try self.makeIdentifier(name);
-        const local_index = self.fun.resolveLocal(index) catch |err|
+    fn namedVariable(self: *Self, name: u24) CompileError!void {
+        const local_index = self.fun.resolveLocal(name) catch |err|
             return self.handleFunctionError(err);
 
         if (self.can_assign and self.match(.Equal)) {
             try self.expression();
             if (local_index) |i| {
                 try self.emitCodeAndByte(.SetLocal, i);
-            } else if (self.fun.resolveUpvalue(index) catch |err|
+            } else if (self.fun.resolveUpvalue(name) catch |err|
                 return self.handleFunctionError(err)) |i|
             {
                 try self.emitCodeAndByte(.SetUpvalue, i);
             } else {
-                try self.setGlobal(index);
+                try self.setGlobal(name);
             }
         } else {
             if (local_index) |i| {
                 try self.emitCodeAndByte(.GetLocal, i);
-            } else if (self.fun.resolveUpvalue(index) catch |err|
+            } else if (self.fun.resolveUpvalue(name) catch |err|
                 return self.handleFunctionError(err)) |i|
             {
                 try self.emitCodeAndByte(.GetUpvalue, i);
             } else {
-                try self.getGlobal(index);
+                try self.getGlobal(name);
             }
         }
     }
@@ -711,6 +743,11 @@ const Compiler = struct {
 
     fn getProperty(self: *Self, index: u24) CompileError!void {
         self.fun.chunk.getProperty(index, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+    }
+
+    fn invoke(self: *Self, index: u24) CompileError!void {
+        self.fun.chunk.invoke(index, self.parser.previous.line) catch
             return CompileError.OutOfMemory;
     }
 
@@ -826,7 +863,8 @@ fn string(c: *Compiler) CompileError!void {
 }
 
 fn variable(c: *Compiler) CompileError!void {
-    try c.namedVariable(&c.parser.previous);
+    const name = try c.makeIdentifier(&c.parser.previous);
+    try c.namedVariable(name);
 }
 
 fn and_(c: *Compiler) CompileError!void {
@@ -849,9 +887,23 @@ fn dot(c: *Compiler) CompileError!void {
     if (c.can_assign and c.match(.Equal)) {
         try c.expression();
         try c.setProperty(name);
+    } else if (c.match(.LeftParen)) {
+        const arg_count = try c.argumentList();
+        try c.invoke(name);
+        try c.emitByte(arg_count);
     } else {
         try c.getProperty(name);
     }
+}
+
+fn this(c: *Compiler) CompileError!void {
+    if (c.current_class == null) {
+        return c.compileError("Can't use 'this' outside of a class.");
+    }
+    const can_assign = c.can_assign;
+    c.can_assign = false;
+    try variable(c);
+    c.can_assign = can_assign;
 }
 
 pub fn compile(heap: *object.Heap, source: []const u8) CompileError!object.Function {

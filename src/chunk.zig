@@ -15,6 +15,8 @@ pub const OpCode = enum(u8) {
     SetPropertyLong,
     GetProperty,
     GetPropertyLong,
+    Invoke,
+    InvokeLong,
     SetLocal,
     GetLocal,
     Nil,
@@ -28,6 +30,8 @@ pub const OpCode = enum(u8) {
     ClosureLong,
     Class,
     ClassLong,
+    Method,
+    MethodLong,
     Equal,
     Matches,
     Greater,
@@ -128,6 +132,10 @@ pub const Chunk = struct {
         try self.writeMaybeLongArg(index, line, .Class, .ClassLong);
     }
 
+    pub fn defineMethod(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .Method, .MethodLong);
+    }
+
     pub fn getGlobal(self: *Self, index: u24, line: u24) !void {
         try self.writeMaybeLongArg(index, line, .GetGlobal, .GetGlobalLong);
     }
@@ -142,6 +150,10 @@ pub const Chunk = struct {
 
     pub fn setProperty(self: *Self, index: u24, line: u24) !void {
         try self.writeMaybeLongArg(index, line, .SetProperty, .SetPropertyLong);
+    }
+
+    pub fn invoke(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .Invoke, .InvokeLong);
     }
 
     pub fn getLine(self: *const Self, offset: u24) u24 {

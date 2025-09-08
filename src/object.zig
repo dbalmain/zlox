@@ -5,6 +5,8 @@ const types = @import("types.zig");
 const VM = @import("vm.zig");
 const config = @import("config");
 
+pub const INIT: u24 = 1;
+
 pub const Local = struct {
     name_index: u24,
     depth: i8,
@@ -44,7 +46,7 @@ pub const Heap = struct {
     obj_count: usize,
 
     pub fn init(allocator: std.mem.Allocator) Heap {
-        return Heap{
+        var self = Heap{
             .allocator = allocator,
             .heap = null,
             .interned_strings = std.StringHashMap(*Obj).init(allocator),
@@ -54,6 +56,13 @@ pub const Heap = struct {
             .next_gc = 0,
             .obj_count = 0,
         };
+
+        // "this" will always be 0
+        _ = self.makeIdentifier("this") catch {};
+        // "init" will always be 1
+        _ = self.makeIdentifier("init") catch {};
+
+        return self;
     }
 
     pub fn deinit(self: *Self) void {
@@ -112,6 +121,13 @@ pub const Heap = struct {
             .closure = closure,
         });
     }
+
+    pub fn makeMethod(self: *Self, receiver: value.Value, fun: *Obj) !*Obj {
+        return self.allocateObj("method", Obj.Data{
+            .bound_method = BoundMethod.init(receiver, fun),
+        });
+    }
+
     pub fn makeUpvalue(self: *Self, location: *value.Value) !*Obj {
         return self.allocateObj("upvalue", Obj.Data{
             .upvalue = ObjUpvalue.init(location),
@@ -130,7 +146,7 @@ pub const Heap = struct {
         });
     }
 
-    pub fn makeInstance(self: *Self, class: *Class) !*Obj {
+    pub fn makeInstance(self: *Self, class: *Obj) !*Obj {
         return self.allocateObj("instance", Obj.Data{
             .instance = Instance.init(class, self),
         });
@@ -225,6 +241,7 @@ pub const Obj = struct {
         upvalue: ObjUpvalue,
         class: Class,
         instance: Instance,
+        bound_method: BoundMethod,
     };
 
     pub fn print(self: *Self, writer: anytype) !void {
@@ -232,10 +249,11 @@ pub const Obj = struct {
             .class => |c| try writer.print("{s}", .{c.name()}),
             .closure => |c| try writer.print("<fn {s}>", .{c.fun().name()}),
             .function => |f| try writer.print("<fn {s}>", .{f.name()}),
-            .instance => |i| try writer.print("{s} instance", .{i.class.name()}),
+            .instance => |i| try writer.print("{s} instance", .{i.class.data.class.name()}),
             .native_function => try writer.print("<native fn>", .{}),
             .string => |s| try writer.print("{s}", .{s.chars}),
             .upvalue => try writer.print("upvalue", .{}),
+            .bound_method => |b| try b.method.print(writer),
             // .function => |f| try writer.print("<fn {s}:{d}>", .{ f.name(), f.arity }),
             // .native_function => |f| try writer.print("<nfn {s}:{d}>", .{ f.name, f.arity }),
         }
@@ -285,6 +303,7 @@ pub const Obj = struct {
 
     fn objType(self: *Self) []const u8 {
         return switch (self.data) {
+            .bound_method => "bound_method",
             .class => "class",
             .closure => "closure",
             .function => "function",
@@ -303,6 +322,7 @@ pub const Obj = struct {
         }
 
         switch (self.data) {
+            .bound_method => |*m| m.deinit(),
             .class => |*c| c.deinit(),
             .closure => |*c| c.deinit(),
             .function => |*f| f.deinit(),
@@ -365,6 +385,8 @@ pub const LOCAL_MAX = std.math.maxInt(u8) + 1;
 
 pub const FunctionType = enum {
     Function,
+    Initialiser,
+    Method,
     Script,
 };
 
@@ -393,7 +415,7 @@ pub const Function = struct {
         arity: u8,
         enclosing: ?*Function,
     ) Self {
-        return Self{
+        var self = Self{
             .arity = arity,
             .chunk = chunk.Chunk.init(heap),
             .local_top = 1,
@@ -405,6 +427,17 @@ pub const Function = struct {
             .heap = heap,
             .enclosing = enclosing,
         };
+
+        // the first local is `this`
+        self.locals[0] = Local{
+            .name_index = if (function_type == FunctionType.Function)
+                std.math.maxInt(u24)
+            else
+                0,
+            .depth = 0,
+            .is_captured = false,
+        };
+        return self;
     }
 
     pub fn mark(self: *Self) void {
@@ -536,15 +569,17 @@ const ObjUpvalue = struct {
     }
 };
 
-const Class = struct {
+pub const Class = struct {
     const Self = @This();
     name_index: u24,
+    methods: std.AutoHashMap(u24, value.Value),
     heap: *Heap,
 
     fn init(name_index: u24, heap: *Heap) Self {
         return Self{
             .name_index = name_index,
             .heap = heap,
+            .methods = std.AutoHashMap(u24, value.Value).init(heap.allocator),
         };
     }
 
@@ -553,21 +588,22 @@ const Class = struct {
     }
 
     fn mark(self: *Self) void {
-        _ = self;
+        var method_iterator = self.methods.iterator();
+        while (method_iterator.next()) |entry| entry.value_ptr.mark();
     }
 
     fn deinit(self: *Self) void {
-        _ = self;
+        self.methods.deinit();
     }
 };
 
 pub const Instance = struct {
     const Self = @This();
-    class: *Class,
+    class: *Obj,
     fields: std.AutoHashMap(u24, value.Value),
     cached_property: u24,
 
-    fn init(class: *Class, heap: *Heap) Self {
+    fn init(class: *Obj, heap: *Heap) Self {
         return Self{
             .class = class,
             .fields = std.AutoHashMap(u24, value.Value).init(heap.allocator),
@@ -590,7 +626,7 @@ pub const Instance = struct {
         if (self.cached_property == name) {
             return self.fields.get(name);
         }
-        
+
         // Slow path - do lookup and update cache
         if (self.fields.get(name)) |val| {
             self.cached_property = name;
@@ -606,5 +642,54 @@ pub const Instance = struct {
         try self.fields.put(name, val);
         // Update cache on set
         self.cached_property = name;
+    }
+};
+
+pub const Callable = union(enum) {
+    const Self = @This();
+    function: *Function,
+    closure: *Closure,
+
+    pub fn name(self: *const Self) []const u8 {
+        return switch (self.*) {
+            .function => |fun| fun.name(),
+            .closure => |closure| closure.fun().name(),
+        };
+    }
+
+    pub fn chk(self: *const Self) *const chunk.Chunk {
+        return switch (self.*) {
+            .function => |fun| &fun.chunk,
+            .closure => |closure| &closure.fun().chunk,
+        };
+    }
+
+    pub fn arity(self: *const Self) u8 {
+        return switch (self.*) {
+            .function => |fun| fun.arity,
+            .closure => |closure| closure.fun().arity,
+        };
+    }
+};
+
+const BoundMethod = struct {
+    const Self = @This();
+    receiver: value.Value,
+    method: *Obj,
+
+    fn init(receiver: value.Value, method: *Obj) Self {
+        return Self{
+            .receiver = receiver,
+            .method = method,
+        };
+    }
+
+    fn mark(self: *Self) void {
+        self.receiver.mark();
+        self.method.mark();
+    }
+
+    fn deinit(self: *Self) void {
+        _ = self;
     }
 };

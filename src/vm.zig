@@ -17,40 +17,13 @@ const BinaryOperator = enum {
     Greater,
 };
 
-const Callable = union(enum) {
-    const Self = @This();
-    function: *object.Function,
-    closure: *object.Closure,
-
-    fn name(self: *const Self) []const u8 {
-        return switch (self.*) {
-            .function => |fun| fun.name(),
-            .closure => |closure| closure.fun().name(),
-        };
-    }
-
-    fn chk(self: *const Self) *const chunk.Chunk {
-        return switch (self.*) {
-            .function => |fun| &fun.chunk,
-            .closure => |closure| &closure.fun().chunk,
-        };
-    }
-
-    fn arity(self: *const Self) u8 {
-        return switch (self.*) {
-            .function => |fun| fun.arity,
-            .closure => |closure| closure.fun().arity,
-        };
-    }
-};
-
 const CallFrame = struct {
     const Self = @This();
-    callable: Callable,
+    callable: object.Callable,
     ip: [*]u8,
     slots: []value.Value,
 
-    fn init(callable: Callable, slots: []value.Value) Self {
+    fn init(callable: object.Callable, slots: []value.Value) Self {
         return Self{
             .callable = callable,
             .ip = callable.chk().code.items.ptr,
@@ -153,7 +126,7 @@ pub const VM = struct {
         self.heap.setVm(self);
 
         // Now call the function from the heap object
-        try self.call(Callable{ .function = &self.stack[0].obj.data.function }, 0);
+        try self.call(object.Callable{ .function = &self.stack[0].obj.data.function }, 0);
         const stdout = std.io.getStdOut().writer();
         var frame = &self.frames[self.frames_top - 1];
         var previous_line: u24 = 0;
@@ -282,11 +255,17 @@ pub const VM = struct {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);
                     _ = try self.pop();
                 },
-                .Class => {
-                    self.push(value.asObject(try self.heap.makeClass(@intCast(frame.readByte()))));
+                .Class => try self.makeClass(@intCast(frame.readByte())),
+                .ClassLong => try self.makeClass(frame.readU24()),
+                .Method => try self.addMethod(@intCast(frame.readByte())),
+                .MethodLong => try self.addMethod(frame.readU24()),
+                .Invoke => {
+                    try self.invoke(@intCast(frame.readByte()), frame.readByte());
+                    frame = &self.frames[self.frames_top - 1];
                 },
-                .ClassLong => {
-                    self.push(value.asObject(try self.heap.makeClass(frame.readU24())));
+                .InvokeLong => {
+                    try self.invoke(frame.readU24(), frame.readByte());
+                    frame = &self.frames[self.frames_top - 1];
                 },
                 .Fun => {},
                 .Var => {},
@@ -306,24 +285,33 @@ pub const VM = struct {
         }
     }
 
-    fn callValue(self: *Self, callee: *value.Value, arg_count: u8) !void {
+    fn callValue(self: *Self, callee: *const value.Value, arg_count: u8) !void {
         if (callee.withObject()) |obj| {
             switch (obj.*.data) {
                 .class => |*class| {
                     self.stack[self.stack_top - arg_count - 1] =
-                        value.asObject(try self.heap.makeInstance(class));
+                        value.asObject(try self.heap.makeInstance(obj));
+                    if (class.methods.get(object.INIT)) |*initialiser| {
+                        try self.callValue(initialiser, arg_count);
+                    } else if (arg_count > 0) {
+                        return self.runtimeError("Expected 0 arguments but got {d}.", .{arg_count});
+                    }
                     return;
                 },
-                .closure => |*closure| return self.call(Callable{ .closure = closure }, arg_count),
-                .function => |*fun| return self.call(Callable{ .function = fun }, arg_count),
+                .closure => |*closure| return self.call(object.Callable{ .closure = closure }, arg_count),
+                .function => |*fun| return self.call(object.Callable{ .function = fun }, arg_count),
                 .native_function => |*fun| return self.nativeCall(fun, arg_count),
+                .bound_method => |*method| {
+                    self.stack[self.stack_top - arg_count - 1] = method.receiver;
+                    return try self.callValue(&value.asObject(method.method), arg_count);
+                },
                 else => {},
             }
         }
         return self.runtimeError("Can only call functions and classes.", .{});
     }
 
-    fn call(self: *Self, callable: Callable, arg_count: u8) !void {
+    fn call(self: *Self, callable: object.Callable, arg_count: u8) !void {
         if (arg_count != callable.arity()) {
             return self.runtimeError("Expected {d} arguments but got {d}.", .{ callable.arity(), arg_count });
         }
@@ -349,6 +337,38 @@ pub const VM = struct {
         };
         self.stack_top = self.stack_top - arg_count - 1;
         self.push(result);
+    }
+
+    fn invoke(self: *Self, name: u24, arg_count: u8) !void {
+        const receiver = self.peek(arg_count);
+        if (receiver.withInstance()) |instance| {
+            if (instance.fields.get(name)) |fun| {
+                self.stack[self.stack_top - arg_count - 1] = fun;
+                return self.callValue(&fun, arg_count);
+            }
+            return self.invokeFromClass(&instance.class.data.class, name, arg_count);
+        } else {
+            return self.runtimeError("Only instances have methods.", .{});
+        }
+    }
+
+    fn invokeFromClass(self: *Self, class: *object.Class, name: u24, arg_count: u8) !void {
+        if (class.methods.get(name)) |method| {
+            try self.callValue(&method, arg_count);
+        } else {
+            return self.runtimeError("Undefined property '{s}'.", .{self.heap.names.items[name]});
+        }
+    }
+
+    fn makeClass(self: *Self, name: u24) !void {
+        self.push(value.asObject(try self.heap.makeClass(name)));
+    }
+
+    fn addMethod(self: *Self, name: u24) !void {
+        const method = self.peek(0);
+        var class = &self.peek(1).obj.data.class;
+        try class.methods.put(name, method.*);
+        _ = try self.pop();
     }
 
     fn makeClosure(self: *Self, frame: *CallFrame, fun: value.Value) !void {
@@ -468,11 +488,22 @@ pub const VM = struct {
             if (instance.getProperty(name)) |val| {
                 _ = try self.pop();
                 self.push(val);
-            } else {
+            } else if (!try self.bindMethod(instance.class, name)) {
                 return self.runtimeError("Undefined property '{s}'.", .{self.heap.names.items[name]});
             }
         } else {
             return self.runtimeError("Only instances have properties.", .{});
+        }
+    }
+
+    fn bindMethod(self: *Self, class: *object.Obj, name: u24) !bool {
+        if (class.data.class.methods.get(name)) |method| {
+            const bound = try self.heap.makeMethod(self.peek(0).*, method.obj);
+            _ = try self.pop();
+            self.push(value.asObject(bound));
+            return true;
+        } else {
+            return false;
         }
     }
 
