@@ -17,6 +17,10 @@ pub const OpCode = enum(u8) {
     GetPropertyLong,
     Invoke,
     InvokeLong,
+    Super,
+    SuperLong,
+    SuperInvoke,
+    SuperInvokeLong,
     SetLocal,
     GetLocal,
     Nil,
@@ -30,6 +34,7 @@ pub const OpCode = enum(u8) {
     ClosureLong,
     Class,
     ClassLong,
+    Inherit,
     Method,
     MethodLong,
     Equal,
@@ -154,6 +159,14 @@ pub const Chunk = struct {
 
     pub fn invoke(self: *Self, index: u24, line: u24) !void {
         try self.writeMaybeLongArg(index, line, .Invoke, .InvokeLong);
+    }
+
+    pub fn emitSuper(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .Super, .SuperLong);
+    }
+
+    pub fn emitSuperInvoke(self: *Self, index: u24, line: u24) !void {
+        try self.writeMaybeLongArg(index, line, .SuperInvoke, .SuperInvokeLong);
     }
 
     pub fn getLine(self: *const Self, offset: u24) u24 {

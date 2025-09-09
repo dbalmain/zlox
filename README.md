@@ -14,24 +14,23 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 28**: Methods and Initializers - ✅ Complete (with Invoke Optimization)
-  - Complete method system with method definitions, binding, and invocation in classes
-  - **Method declarations**: Methods defined within class bodies with proper name resolution and storage
-  - **Method binding**: Runtime method binding creating BoundMethod objects for `this` context preservation
-  - **Method invocation**: Direct method calls on instances with `instance.method()` syntax
-  - **Constructor support**: Special `init` methods for object initialization with automatic return handling
-  - **`this` keyword**: Implicit `this` parameter in methods providing access to instance state
-  - **Invoke optimization**: Direct method invocation bypassing intermediate bound method creation
-    - OpCodes: `Invoke`, `InvokeLong` for optimized method calls with argument count encoding
-    - Performance improvement by checking methods before fields in property access
-    - Fallback to traditional property access for non-method calls
-  - **Method storage**: Class methods stored in AutoHashMap for efficient lookup and inheritance preparation
-  - **Constructor semantics**: `init` methods automatically return instance, other methods return `nil` by default
-  - **Runtime type safety**: Proper error handling for method calls on non-instance values
-  - New OpCodes: `Method`, `MethodLong`, `Invoke`, `InvokeLong` for comprehensive method support
-  - Enhanced object system with `BoundMethod` type for method binding and `INIT` constant recognition
-  - VM integration with method binding, invocation, and constructor calling during class instantiation
-  - Memory management integration with GC marking for bound methods and method storage
+- **Chapter 29**: Superclasses - ✅ Complete (with SuperInvoke Optimization)
+  - Complete inheritance system with `class Derived < Base` syntax and method resolution
+  - **Class inheritance**: Classes inherit methods from superclasses with runtime method copying
+  - **Super method calls**: `super.method()` syntax for accessing overridden superclass methods
+  - **Super keyword support**: Proper scoping of `super` in method closures and nested contexts
+  - **SuperInvoke optimization**: Direct super method calls bypassing intermediate bound method creation
+    - OpCodes: `SuperInvoke`, `SuperInvokeLong` for optimized super method invocation
+    - Performance improvement for super method calls with argument count encoding
+    - Fallback to traditional super property access when optimization not applicable
+  - **Method inheritance**: Superclass methods copied to subclass for efficient method resolution
+  - **Inheritance validation**: Prevents circular inheritance and ensures proper class hierarchy
+  - **Enhanced ClassCompiler**: Tracks superclass relationships with `has_super` field for proper compilation
+  - **Proper `this` binding**: Inherited methods correctly bind to subclass instances
+  - New OpCodes: `Super`, `SuperLong`, `SuperInvoke`, `SuperInvokeLong`, `Inherit` for inheritance support
+  - Enhanced object system with superclass method resolution and proper scoping
+  - VM integration with inheritance operations and super method binding during class creation
+  - Memory management integration with GC marking for inherited method structures
 
 ## Building and Running
 

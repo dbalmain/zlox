@@ -82,7 +82,7 @@ fn getRule(token_type: scanner.TokenType) ParseRule {
         .Or => ParseRule.init(null, or_, .Or),
         .Print => ParseRule.init(null, null, .None),
         .Return => ParseRule.init(null, null, .None),
-        .Super => ParseRule.init(null, null, .None),
+        .Super => ParseRule.init(super, null, .None),
         .Switch => ParseRule.init(null, null, .None),
         .This => ParseRule.init(this, null, .None),
         .True => ParseRule.init(literal, null, .None),
@@ -109,6 +109,7 @@ const Parser = struct {
 
 const ClassCompiler = struct {
     enclosing: ?*ClassCompiler,
+    has_super: bool,
 };
 
 const Compiler = struct {
@@ -281,6 +282,8 @@ const Compiler = struct {
         switch (err) {
             error.TooManyClosureVariables,
             => self.compileError("Too many closure variables in function."),
+            error.TooManyLocalVariables,
+            => self.compileError("Too many local variables in function."),
             error.VariableDeclarationSelfReference,
             => self.compileError("Can't read local variable in its own initializer."),
         }
@@ -353,8 +356,31 @@ const Compiler = struct {
         try self.defineVariable(name);
         var class_compiler = ClassCompiler{
             .enclosing = self.current_class,
+            .has_super = false,
         };
         self.current_class = &class_compiler;
+        if (self.match(.Less)) {
+            self.consume(.Identifier, "Expect superclass name.");
+            self.can_assign = false;
+            const super_class_name = try self.makeIdentifier(&self.parser.previous);
+            if (super_class_name == name) {
+                return self.compileError("A class can't inherit from itself.");
+            }
+            try self.namedVariable(super_class_name);
+            
+            // Create a new scope to bind 'super' as a local variable.
+            // This allows methods in the subclass to reference the superclass
+            // via the 'super' keyword, even in closures created within methods.
+            // The superclass object will be stored in local slot 0 of this scope.
+            self.beginScope();
+            self.fun.addLocal(object.SUPER) catch |err|
+                return self.handleFunctionError(err);
+            try self.defineVariable(0); // 'super' is now a local variable pointing to superclass
+            
+            try self.namedVariable(name);
+            try self.emitCode(.Inherit); // Copy methods from superclass to subclass
+            class_compiler.has_super = true;
+        }
         try self.namedVariable(name);
         self.consume(.LeftBrace, "Expect '{' before class body.");
         while (!self.check(.RightBrace) and !self.check(.Eof)) {
@@ -363,6 +389,11 @@ const Compiler = struct {
         self.consume(.RightBrace, "Expect '}' after class body.");
         try self.emitCode(.Pop);
 
+        // Clean up the 'super' scope when exiting the class declaration.
+        // This ensures 'super' is only available within methods of classes that have a superclass.
+        if (class_compiler.has_super) {
+            try self.endScope(); // Pops the 'super' local variable from scope
+        }
         self.current_class = self.current_class.?.enclosing;
     }
 
@@ -670,16 +701,12 @@ const Compiler = struct {
         self.consume(.Identifier, error_message);
         const name_index = try self.makeIdentifier(&self.parser.previous);
         if (self.scope_depth > 0) {
-            self.declareVariable(name_index);
+            try self.declareVariable(name_index);
         }
         return name_index;
     }
 
-    fn declareVariable(self: *Self, name_index: u24) void {
-        if (self.fun.local_top == object.LOCAL_MAX) {
-            self.compileError("Too many local variables in function.");
-            return;
-        }
+    fn declareVariable(self: *Self, name_index: u24) CompileError!void {
         var i = self.fun.local_top;
         while (i > 0) {
             i -= 1;
@@ -689,8 +716,8 @@ const Compiler = struct {
                 self.compileError("Already a variable with this name in this scope.");
             }
         }
-        self.fun.locals[self.fun.local_top] = object.Local.init(name_index);
-        self.fun.local_top += 1;
+        self.fun.addLocal(name_index) catch |err|
+            return self.handleFunctionError(err);
     }
 
     fn makeIdentifier(self: *Self, name_token: *scanner.Token) CompileError!u24 {
@@ -748,6 +775,16 @@ const Compiler = struct {
 
     fn invoke(self: *Self, index: u24) CompileError!void {
         self.fun.chunk.invoke(index, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+    }
+
+    fn emitSuper(self: *Self, index: u24) CompileError!void {
+        self.fun.chunk.emitSuper(index, self.parser.previous.line) catch
+            return CompileError.OutOfMemory;
+    }
+
+    fn emitSuperInvoke(self: *Self, index: u24) CompileError!void {
+        self.fun.chunk.emitSuperInvoke(index, self.parser.previous.line) catch
             return CompileError.OutOfMemory;
     }
 
@@ -904,6 +941,30 @@ fn this(c: *Compiler) CompileError!void {
     c.can_assign = false;
     try variable(c);
     c.can_assign = can_assign;
+}
+
+fn super(c: *Compiler) CompileError!void {
+    if (c.current_class) |current_class| {
+        if (!current_class.has_super) {
+            return c.compileError("Can't use 'super' in a class with no superclass.");
+        }
+        c.consume(.Dot, "Expect '.' after 'super'.");
+        c.consume(.Identifier, "Expect superclass method name.");
+        const name = try c.makeIdentifier(&c.parser.previous);
+        c.can_assign = false;
+        try c.namedVariable(object.THIS);
+        if (c.match(.LeftParen)) {
+            const arg_count = try c.argumentList();
+            try c.namedVariable(object.SUPER);
+            try c.emitSuperInvoke(name);
+            try c.emitByte(arg_count);
+        } else {
+            try c.namedVariable(object.SUPER);
+            try c.emitSuper(name);
+        }
+    } else {
+        return c.compileError("Can't use 'super' outside of a class.");
+    }
 }
 
 pub fn compile(heap: *object.Heap, source: []const u8) CompileError!object.Function {

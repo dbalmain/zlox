@@ -5,7 +5,9 @@ const types = @import("types.zig");
 const VM = @import("vm.zig");
 const config = @import("config");
 
-pub const INIT: u24 = 1;
+pub var THIS: u24 = undefined;
+pub var INIT: u24 = undefined;
+pub var SUPER: u24 = undefined;
 
 pub const Local = struct {
     name_index: u24,
@@ -57,12 +59,18 @@ pub const Heap = struct {
             .obj_count = 0,
         };
 
-        // "this" will always be 0
-        _ = self.makeIdentifier("this") catch {};
-        // "init" will always be 1
-        _ = self.makeIdentifier("init") catch {};
+        self.initKeywords();
 
         return self;
+    }
+
+    fn initKeywords(self: *Heap) void {
+        const keywords = [_][]const u8{ "this", "init", "super" };
+        const indices = [_]*u24{ &THIS, &INIT, &SUPER };
+
+        inline for (keywords, indices) |keyword, index_ptr| {
+            index_ptr.* = self.makeIdentifier(keyword) catch unreachable;
+        }
     }
 
     pub fn deinit(self: *Self) void {
@@ -391,6 +399,7 @@ pub const FunctionType = enum {
 };
 
 pub const FunctionError = error{
+    TooManyLocalVariables,
     TooManyClosureVariables,
     VariableDeclarationSelfReference,
 };
@@ -465,6 +474,14 @@ pub const Function = struct {
             }
         }
         return null;
+    }
+
+    pub fn addLocal(self: *Self, name_index: u24) FunctionError!void {
+        if (self.local_top == LOCAL_MAX) {
+            return FunctionError.TooManyLocalVariables;
+        }
+        self.locals[self.local_top] = Local.init(name_index);
+        self.local_top += 1;
     }
 
     pub fn resolveUpvalue(self: *Self, name_index: u24) FunctionError!?u8 {

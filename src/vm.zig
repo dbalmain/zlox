@@ -267,6 +267,31 @@ pub const VM = struct {
                     try self.invoke(frame.readU24(), frame.readByte());
                     frame = &self.frames[self.frames_top - 1];
                 },
+                .SuperInvoke => {
+                    try self.superInvoke(@intCast(frame.readByte()), frame.readByte());
+                    frame = &self.frames[self.frames_top - 1];
+                },
+                .SuperInvokeLong => {
+                    try self.superInvoke(frame.readU24(), frame.readByte());
+                    frame = &self.frames[self.frames_top - 1];
+                },
+                .Super => try self.super(@intCast(frame.readByte())),
+                .SuperLong => try self.super(frame.readU24()),
+                .Inherit => {
+                    if (self.peek(1).withClass()) |super_class| {
+                        if (self.peek(0).withClass()) |sub_class| {
+                            var method_iterator = super_class.methods.iterator();
+                            while (method_iterator.next()) |entry| {
+                                try sub_class.methods.put(entry.key_ptr.*, entry.value_ptr.*);
+                            }
+                            _ = try self.pop();
+                        } else {
+                            return self.runtimeError("Subclass must be a class.", .{});
+                        }
+                    } else {
+                        return self.runtimeError("Superclass must be a class.", .{});
+                    }
+                },
                 .Fun => {},
                 .Var => {},
             }
@@ -362,6 +387,21 @@ pub const VM = struct {
 
     fn makeClass(self: *Self, name: u24) !void {
         self.push(value.asObject(try self.heap.makeClass(name)));
+    }
+
+    fn super(self: *Self, name: u24) !void {
+        const superclass = try self.pop();
+        if (!try self.bindMethod(superclass.obj, name)) {
+            return self.runtimeError("Undefined property '{s}'.", .{self.heap.names.items[name]});
+        }
+    }
+
+    fn superInvoke(self: *Self, name: u24, arg_count: u8) !void {
+        if ((try self.pop()).withClass()) |superclass| {
+            try self.invokeFromClass(superclass, name, arg_count);
+        } else {
+            return self.runtimeError("'super' is not a class.", .{});
+        }
     }
 
     fn addMethod(self: *Self, name: u24) !void {
