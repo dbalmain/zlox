@@ -125,7 +125,7 @@ pub const VM = struct {
         self.heap.setVm(self);
 
         // Now call the function from the heap object
-        try self.call(object.Callable{ .function = object.asFunction(self.stack[0].obj) }, 0);
+        try self.call(object.Callable{ .function = object.asFunction(self.stack[0].asObject()) }, 0);
         const stdout = std.io.getStdOut().writer();
         var frame = &self.frames[self.frames_top - 1];
         var previous_line: u24 = 0;
@@ -182,12 +182,13 @@ pub const VM = struct {
                 .Divide => try self.binaryOperation(.Divide),
                 .Less => try self.binaryOperation(.Less),
                 .Greater => try self.binaryOperation(.Greater),
-                .Negate => if (self.peek(0).withMutableNumber()) |n| {
-                    n.* *= -1;
+                .Negate => if (self.peek(0).withNumber()) |n| {
+                    _ = try self.pop();
+                    self.push(value.fromNumber(-n));
                 } else return self.runtimeError("Operand must be a number.", .{}),
                 .Not => self.push(value.fromBoolean((try self.pop()).isFalsey())),
-                .Equal => self.push(value.fromBoolean((try self.pop()).equals(&try self.pop()))),
-                .Matches => self.push(value.fromBoolean((try self.pop()).equals(self.peek(0)))),
+                .Equal => self.push(value.fromBoolean((try self.pop()).equals(try self.pop()))),
+                .Matches => self.push(value.fromBoolean((try self.pop()).equals(self.peek(0).*))),
                 .Print => {
                     (try self.pop()).print(stdout) catch {};
                     stdout.print("\n", .{}) catch {};
@@ -401,7 +402,7 @@ pub const VM = struct {
 
     fn super(self: *Self, name: u24) !void {
         const superclass = try self.pop();
-        if (!try self.bindMethod(superclass.obj, name)) {
+        if (!try self.bindMethod(superclass.asObject(), name)) {
             return self.runtimeError("Undefined property '{s}'.", .{self.heap.names.items[name]});
         }
     }
@@ -416,13 +417,13 @@ pub const VM = struct {
 
     fn addMethod(self: *Self, name: u24) !void {
         const method = self.peek(0);
-        var class = object.asClass(self.peek(1).obj);
+        var class = object.asClass(self.peek(1).asObject());
         try class.methods.put(name, method.*);
         _ = try self.pop();
     }
 
     fn makeClosure(self: *Self, frame: *CallFrame, fun: value.Value) !void {
-        const closure_obj = try self.heap.makeClosure(fun.obj);
+        const closure_obj = try self.heap.makeClosure(fun.asObject());
         self.push(value.fromObject(closure_obj));
         const closure = object.asClosure(closure_obj);
         const slot_count = closure.slots.len;
@@ -557,7 +558,7 @@ pub const VM = struct {
 
     fn bindMethod(self: *Self, class: *object.Obj, name: u24) !bool {
         if (object.asClass(class).methods.get(name)) |method| {
-            const bound = try self.heap.makeMethod(self.peek(0).*, method.obj);
+            const bound = try self.heap.makeMethod(self.peek(0).*, method.asObject());
             _ = try self.pop();
             self.push(value.fromObject(bound));
             return true;

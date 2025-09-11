@@ -2,148 +2,155 @@ const std = @import("std");
 const object = @import("object.zig");
 const types = @import("types.zig");
 
-pub const Value = union(enum) {
+// NaN-Boxing constants
+const SIGN_BIT: u64 = 0x8000000000000000;
+const QNAN: u64 = 0x7ffc000000000000;
+const TAG_NIL: u64 = 1;
+const TAG_FALSE: u64 = 2;
+const TAG_TRUE: u64 = 3;
+
+// NaN-Boxed Value representation
+pub const Value = extern struct {
     const Self = @This();
-    boolean: bool,
-    number: f64,
-    nil: f64,
-    obj: *object.Obj,
+    bits: u64,
 
-    pub fn print(self: *const Self, writer: anytype) !void {
-        switch (self.*) {
-            .boolean => |b| try writer.print("{}", .{b}),
-            .number => |n| try writer.print("{d}", .{n}),
-            .nil => try writer.print("nil", .{}),
-            .obj => |o| try o.print(writer),
-        }
+    // Type checking methods using NaN-Boxing
+    pub fn isNumber(self: Self) bool {
+        return (self.bits & QNAN) != QNAN;
     }
 
-    pub fn isBool(self: *const Self) bool {
-        switch (self.*) {
-            .boolean => true,
-            else => false,
-        }
+    pub fn isNil(self: Self) bool {
+        return self.bits == (QNAN | TAG_NIL);
     }
 
-    pub fn isNumber(self: *const Self) bool {
-        switch (self.*) {
-            .number => true,
-            else => false,
-        }
+    pub fn isBool(self: Self) bool {
+        return (self.bits | 1) == (QNAN | TAG_TRUE);
     }
 
-    pub fn isNil(self: *const Self) bool {
-        return switch (self.*) {
-            .nil => true,
-            else => false,
-        };
+    pub fn isObj(self: Self) bool {
+        return (self.bits & (QNAN | SIGN_BIT)) == (QNAN | SIGN_BIT);
     }
 
-    pub fn isObj(self: *const Self) bool {
-        return switch (self.*) {
-            .obj => true,
-            else => false,
-        };
+    pub fn isString(self: Self) bool {
+        if (!self.isObj()) return false;
+        const obj = self.asObject();
+        return obj.isString();
     }
 
-    pub fn isString(self: *const Self) bool {
-        return switch (self.*) {
-            .obj => |o| o.isString(),
-            else => false,
-        };
+    pub fn isFalsey(self: Self) bool {
+        return self.isNil() or (self.isBool() and !self.asBoolean());
     }
 
-    pub fn isFalsey(self: *const Self) bool {
-        return switch (self.*) {
-            .boolean => |b| b == false,
-            .nil => true,
-            else => false,
-        };
+    // Value extraction methods
+    pub fn asNumber(self: Self) f64 {
+        std.debug.assert(self.isNumber());
+        return @bitCast(self.bits);
     }
 
-    pub fn equals(self: *const Self, other: *const Value) bool {
-        return switch (self.*) {
-            .number => |n| if (other.withNumber()) |o| o == n else false,
-            .boolean => |b| if (other.withBoolean()) |o| o == b else false,
-            .nil => other.isNil(),
-            .obj => |o| if (other.withObject()) |p| o.equals(p) else false,
-        };
+    pub fn asBoolean(self: Self) bool {
+        std.debug.assert(self.isBool());
+        return self.bits == (QNAN | TAG_TRUE);
     }
 
-    pub fn withBoolean(self: *const Self) ?bool {
-        return switch (self.*) {
-            .boolean => |b| b,
-            else => null,
-        };
+    pub fn asObject(self: Self) *object.Obj {
+        std.debug.assert(self.isObj());
+        return @ptrFromInt(self.bits & ~(SIGN_BIT | QNAN));
     }
 
-    pub fn withNumber(self: *const Self) ?f64 {
-        return switch (self.*) {
-            .number => |n| n,
-            else => null,
-        };
+    // Optional extraction methods for compatibility
+    pub fn withNumber(self: Self) ?f64 {
+        return if (self.isNumber()) self.asNumber() else null;
+    }
+
+    pub fn withBoolean(self: Self) ?bool {
+        return if (self.isBool()) self.asBoolean() else null;
     }
 
     pub fn withMutableNumber(self: *Self) ?*f64 {
-        return switch (self.*) {
-            .number => |*n| n,
-            else => null,
-        };
+        // NaN-boxing doesn't support mutable number references
+        _ = self;
+        return null;
     }
 
-    pub fn withObject(self: *const Self) ?*object.Obj {
-        return switch (self.*) {
-            .obj => |o| o,
-            else => null,
-        };
+    pub fn withObject(self: Self) ?*object.Obj {
+        return if (self.isObj()) self.asObject() else null;
     }
 
-    pub fn withClass(self: *const Self) ?*object.Class {
-        return switch (self.*) {
-            .obj => |o| if (o.obj_type == .class) object.asClass(o) else null,
-            else => null,
-        };
+    pub fn withClass(self: Self) ?*object.Class {
+        if (!self.isObj()) return null;
+        const obj = self.asObject();
+        return if (obj.obj_type == .class) object.asClass(obj) else null;
     }
 
-    pub fn withInstance(self: *const Self) ?*object.Instance {
-        return switch (self.*) {
-            .obj => |o| if (o.obj_type == .instance) object.asInstance(o) else null,
-            else => null,
-        };
+    pub fn withInstance(self: Self) ?*object.Instance {
+        if (!self.isObj()) return null;
+        const obj = self.asObject();
+        return if (obj.obj_type == .instance) object.asInstance(obj) else null;
     }
 
-    pub fn asStringChars(self: *const Self) []const u8 {
-        switch (self.*) {
-            .obj => |o| {
-                std.debug.assert(o.obj_type == .string);
-                return object.asString(o).chars;
-            },
-            else => unreachable,
+    pub fn asStringChars(self: Self) []const u8 {
+        std.debug.assert(self.isObj());
+        const obj = self.asObject();
+        std.debug.assert(obj.obj_type == .string);
+        return object.asString(obj).chars;
+    }
+
+    // Equality comparison
+    pub fn equals(self: Self, other: Self) bool {        
+        if (self.isObj() and other.isObj()) {
+            return self.asObject().equals(other.asObject());
+        }
+        
+        // For numbers, we need special NaN handling
+        if (self.isNumber() or other.isNumber()) {
+            if (!self.isNumber() or !other.isNumber()) return false;
+            const a = self.asNumber();
+            const b = other.asNumber();
+            // NaN is not equal to anything, including itself
+            if (std.math.isNan(a) or std.math.isNan(b)) return false;
+            return a == b;
+        }
+        
+        // For non-numbers, non-objects (booleans, nil), compare bits
+        return self.bits == other.bits;
+    }
+
+    // Printing support
+    pub fn print(self: Self, writer: anytype) !void {
+        if (self.isNumber()) {
+            try writer.print("{d}", .{self.asNumber()});
+        } else if (self.isBool()) {
+            try writer.print("{}", .{self.asBoolean()});
+        } else if (self.isNil()) {
+            try writer.print("nil", .{});
+        } else if (self.isObj()) {
+            try self.asObject().print(writer);
         }
     }
 
-    pub fn mark(self: *Self) void {
-        switch (self.*) {
-            .obj => |o| o.mark(),
-            else => {},
+    // Garbage collection support
+    pub fn mark(self: Self) void {
+        if (self.isObj()) {
+            self.asObject().mark();
         }
     }
 };
 
-pub const nil_val = Value{ .nil = 0 };
-pub const true_val = Value{ .boolean = true };
-pub const false_val = Value{ .boolean = false };
+// NaN-Boxed value constructors
+pub const nil_val = Value{ .bits = QNAN | TAG_NIL };
+pub const true_val = Value{ .bits = QNAN | TAG_TRUE };
+pub const false_val = Value{ .bits = QNAN | TAG_FALSE };
 
 pub fn fromBoolean(b: bool) Value {
-    return Value{ .boolean = b };
+    return Value{ .bits = QNAN | (if (b) TAG_TRUE else TAG_FALSE) };
 }
 
 pub fn fromNumber(n: f64) Value {
-    return Value{ .number = n };
+    return Value{ .bits = @bitCast(n) };
 }
 
 pub fn fromObject(o: *object.Obj) Value {
-    return Value{ .obj = o };
+    return Value{ .bits = SIGN_BIT | QNAN | @intFromPtr(o) };
 }
 
 pub const ValueError = types.ValueError;

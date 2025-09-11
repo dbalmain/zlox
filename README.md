@@ -12,7 +12,7 @@ This project implements the bytecode virtual machine from Part II of the book, w
 
 ## Current Status
 
-- **Chapter 30**: Memory Optimization - ✅ Complete (97-98% Memory Reduction)
+- **Chapter 30**: Memory Optimization - ✅ Complete (97-98% Memory Reduction + NaN-Boxing)
   - **C-style Object System**: Complete refactoring from tagged union to C-style inheritance pattern
     - **Massive Memory Efficiency**: String objects reduced from ~2,744 bytes to ~16 bytes (97-98% reduction)
     - **Eliminated Memory Overhead**: Removed 274,000% memory bloat from tagged union approach
@@ -21,6 +21,11 @@ This project implements the bytecode virtual machine from Part II of the book, w
     - **Enhanced Object Architecture**: Base `Obj` struct with `obj_type`, `is_marked`, `next` fields
     - **Specialized Heap Allocation**: Object-specific allocation methods for optimal memory usage
     - **Clean API Design**: Object methods moved directly onto `Obj` struct for intuitive interface
+  - **NaN-Boxing Value Optimization**: 50% memory reduction for Value representation (v0.30.1)
+    - **8-byte Values**: Complete rewrite from 16-byte tagged union to 8-byte NaN-boxed encoding
+    - **IEEE 754 NaN-Boxing**: Uses quiet NaN bit patterns for efficient non-number encoding
+    - **Proper NaN Semantics**: Correct NaN ≠ NaN handling per IEEE 754 standard
+    - **Cache Optimization**: Improved CPU cache utilization with smaller value representation
   - **Critical Bug Fixes**: Resolved bytecode corruption caused by stack/heap pointer mismatch
   - **VM Integration**: Updated all object access patterns from `obj.data.xxx` to type-safe casting
   - **Performance Improvements**: Better cache utilization and reduced memory fragmentation
@@ -52,6 +57,21 @@ zig build run -Dgc-grow-factor=3 -- script.lox
 
 # Run tests
 zig build test
+
+# Release builds for optimal performance
+zig build -Doptimize=ReleaseFast    # Maximum performance
+zig build -Doptimize=ReleaseSafe    # Performance with safety checks  
+zig build -Doptimize=ReleaseSmall   # Minimum binary size
+
+# Run release build
+zig build run -Doptimize=ReleaseFast -- script.lox
+```
+
+**Release Build Options:**
+- `ReleaseFast` provides maximum performance by disabling runtime safety checks
+- `ReleaseSafe` provides good performance while keeping safety checks
+- `ReleaseSmall` optimizes for minimum binary size
+
 ```
 
 ## Project Structure
