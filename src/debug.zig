@@ -1,6 +1,7 @@
 const std = @import("std");
 const chunk = @import("chunk.zig");
 const value = @import("value.zig");
+const object = @import("object.zig");
 
 pub fn disassembleChunk(self: *const chunk.Chunk, name: []const u8) !void {
     std.debug.print("== {s} ==\n", .{name});
@@ -27,7 +28,8 @@ pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?us
     } else {
         std.debug.print("   | ", .{});
     }
-    const instruction: chunk.OpCode = @enumFromInt(self.code.items[offset]);
+    const raw_byte = self.code.items[offset];
+    const instruction: chunk.OpCode = @enumFromInt(raw_byte);
     switch (instruction) {
         .Constant => return constantInstruction(self, offset, instruction),
         .ConstantLong => return constantLongInstruction(self, offset, instruction),
@@ -139,7 +141,7 @@ fn closureInstruction(self: *const chunk.Chunk, start_offset: usize, is_long: bo
     const function_value = self.constants.values.items[constant];
     try function_value.print(std.io.getStdErr().writer());
     std.debug.print("\n", .{});
-    const function = function_value.obj.data.function;
+    const function = object.asFunction(function_value.obj);
     for (0..function.upvalue_top) |_| {
         const is_local = self.code.items[offset];
         const index = self.code.items[offset + 1];

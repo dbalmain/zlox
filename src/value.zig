@@ -100,29 +100,23 @@ pub const Value = union(enum) {
 
     pub fn withClass(self: *const Self) ?*object.Class {
         return switch (self.*) {
-            .obj => |o| switch (o.data) {
-                .class => |*c| c,
-                else => null,
-            },
+            .obj => |o| if (o.obj_type == .class) object.asClass(o) else null,
             else => null,
         };
     }
 
     pub fn withInstance(self: *const Self) ?*object.Instance {
         return switch (self.*) {
-            .obj => |o| switch (o.data) {
-                .instance => |*i| i,
-                else => null,
-            },
+            .obj => |o| if (o.obj_type == .instance) object.asInstance(o) else null,
             else => null,
         };
     }
 
     pub fn asStringChars(self: *const Self) []const u8 {
         switch (self.*) {
-            .obj => |o| switch (o.data) {
-                .string => |s| return s.chars,
-                else => unreachable,
+            .obj => |o| {
+                std.debug.assert(o.obj_type == .string);
+                return object.asString(o).chars;
             },
             else => unreachable,
         }
@@ -140,15 +134,15 @@ pub const nil_val = Value{ .nil = 0 };
 pub const true_val = Value{ .boolean = true };
 pub const false_val = Value{ .boolean = false };
 
-pub fn asBoolean(b: bool) Value {
+pub fn fromBoolean(b: bool) Value {
     return Value{ .boolean = b };
 }
 
-pub fn asNumber(n: f64) Value {
+pub fn fromNumber(n: f64) Value {
     return Value{ .number = n };
 }
 
-pub fn asObject(o: *object.Obj) Value {
+pub fn fromObject(o: *object.Obj) Value {
     return Value{ .obj = o };
 }
 

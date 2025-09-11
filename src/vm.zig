@@ -79,7 +79,7 @@ pub const VM = struct {
     heap: *object.Heap,
     open_upvalues: ?*object.Obj,
 
-    pub fn init(heap: *object.Heap, function: object.Function) !Self {
+    pub fn init(heap: *object.Heap, function: *object.Obj) !Self {
         var self = Self{
             .heap = heap,
             .frames = undefined,
@@ -96,9 +96,8 @@ pub const VM = struct {
         try self.defineNative("cos", 1, cosNative);
         try self.defineNative("string", 1, stringNative);
 
-        // Create a heap-allocated function object first
-        const function_obj = try heap.makeFunction(function);
-        self.push(value.asObject(function_obj));
+        // The function is already a heap-allocated object
+        self.push(value.fromObject(function));
 
         return self;
     }
@@ -113,7 +112,7 @@ pub const VM = struct {
         var maybe_upvalue = self.open_upvalues;
         while (maybe_upvalue) |upvalue| {
             upvalue.mark();
-            maybe_upvalue = upvalue.data.upvalue.next;
+            maybe_upvalue = object.asUpvalue(upvalue).next;
         }
     }
 
@@ -126,7 +125,7 @@ pub const VM = struct {
         self.heap.setVm(self);
 
         // Now call the function from the heap object
-        try self.call(object.Callable{ .function = &self.stack[0].obj.data.function }, 0);
+        try self.call(object.Callable{ .function = object.asFunction(self.stack[0].obj) }, 0);
         const stdout = std.io.getStdOut().writer();
         var frame = &self.frames[self.frames_top - 1];
         var previous_line: u24 = 0;
@@ -166,14 +165,14 @@ pub const VM = struct {
                         if (self.peek(1).withObject()) |left| {
                             _ = try self.pop();
                             _ = try self.pop();
-                            self.push(value.asObject(left.add(self.heap, right) catch
+                            self.push(value.fromObject(left.add(self.heap, right) catch
                                 return self.runtimeError("Operands must be two numbers or two strings.", .{})));
                         } else return self.runtimeError("Operands must be two numbers or two strings.", .{});
                     } else {
                         // Check if both operands are numbers
                         if ((try self.pop()).withNumber()) |right| {
                             if ((try self.pop()).withNumber()) |left| {
-                                self.push(value.asNumber(left + right));
+                                self.push(value.fromNumber(left + right));
                             } else return self.runtimeError("Operands must be two numbers or two strings.", .{});
                         } else return self.runtimeError("Operands must be two numbers or two strings.", .{});
                     }
@@ -186,9 +185,9 @@ pub const VM = struct {
                 .Negate => if (self.peek(0).withMutableNumber()) |n| {
                     n.* *= -1;
                 } else return self.runtimeError("Operand must be a number.", .{}),
-                .Not => self.push(value.asBoolean((try self.pop()).isFalsey())),
-                .Equal => self.push(value.asBoolean((try self.pop()).equals(&try self.pop()))),
-                .Matches => self.push(value.asBoolean((try self.pop()).equals(self.peek(0)))),
+                .Not => self.push(value.fromBoolean((try self.pop()).isFalsey())),
+                .Equal => self.push(value.fromBoolean((try self.pop()).equals(&try self.pop()))),
+                .Matches => self.push(value.fromBoolean((try self.pop()).equals(self.peek(0)))),
                 .Print => {
                     (try self.pop()).print(stdout) catch {};
                     stdout.print("\n", .{}) catch {};
@@ -245,11 +244,11 @@ pub const VM = struct {
                 .ClosureLong => try self.makeClosure(frame, frame.readLongConstant()),
                 .GetUpvalue => {
                     const slot = frame.readByte();
-                    self.push(frame.callable.closure.slots[slot].data.upvalue.location.*);
+                    self.push(object.asUpvalue(frame.callable.closure.slots[slot]).location.*);
                 },
                 .SetUpvalue => {
                     const slot = frame.readByte();
-                    frame.callable.closure.slots[slot].data.upvalue.location.* = self.peek(0).*;
+                    object.asUpvalue(frame.callable.closure.slots[slot]).location.* = self.peek(0).*;
                 },
                 .CloseUpvalue => {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);
@@ -312,10 +311,11 @@ pub const VM = struct {
 
     fn callValue(self: *Self, callee: *const value.Value, arg_count: u8) !void {
         if (callee.withObject()) |obj| {
-            switch (obj.*.data) {
-                .class => |*class| {
+            switch (obj.obj_type) {
+                .class => {
+                    const class = object.asClass(obj);
                     self.stack[self.stack_top - arg_count - 1] =
-                        value.asObject(try self.heap.makeInstance(obj));
+                        value.fromObject(try self.heap.makeInstance(obj));
                     if (class.methods.get(object.INIT)) |*initialiser| {
                         try self.callValue(initialiser, arg_count);
                     } else if (arg_count > 0) {
@@ -323,12 +323,22 @@ pub const VM = struct {
                     }
                     return;
                 },
-                .closure => |*closure| return self.call(object.Callable{ .closure = closure }, arg_count),
-                .function => |*fun| return self.call(object.Callable{ .function = fun }, arg_count),
-                .native_function => |*fun| return self.nativeCall(fun, arg_count),
-                .bound_method => |*method| {
+                .closure => {
+                    const closure = object.asClosure(obj);
+                    return self.call(object.Callable{ .closure = closure }, arg_count);
+                },
+                .function => {
+                    const fun = object.asFunction(obj);
+                    return self.call(object.Callable{ .function = fun }, arg_count);
+                },
+                .native_function => {
+                    const fun = object.asNativeFunction(obj);
+                    return self.nativeCall(fun, arg_count);
+                },
+                .bound_method => {
+                    const method = object.asBoundMethod(obj);
                     self.stack[self.stack_top - arg_count - 1] = method.receiver;
-                    return try self.callValue(&value.asObject(method.method), arg_count);
+                    return try self.callValue(&value.fromObject(method.method), arg_count);
                 },
                 else => {},
             }
@@ -371,7 +381,7 @@ pub const VM = struct {
                 self.stack[self.stack_top - arg_count - 1] = fun;
                 return self.callValue(&fun, arg_count);
             }
-            return self.invokeFromClass(&instance.class.data.class, name, arg_count);
+            return self.invokeFromClass(object.asClass(instance.class), name, arg_count);
         } else {
             return self.runtimeError("Only instances have methods.", .{});
         }
@@ -386,7 +396,7 @@ pub const VM = struct {
     }
 
     fn makeClass(self: *Self, name: u24) !void {
-        self.push(value.asObject(try self.heap.makeClass(name)));
+        self.push(value.fromObject(try self.heap.makeClass(name)));
     }
 
     fn super(self: *Self, name: u24) !void {
@@ -406,39 +416,47 @@ pub const VM = struct {
 
     fn addMethod(self: *Self, name: u24) !void {
         const method = self.peek(0);
-        var class = &self.peek(1).obj.data.class;
+        var class = object.asClass(self.peek(1).obj);
         try class.methods.put(name, method.*);
         _ = try self.pop();
     }
 
     fn makeClosure(self: *Self, frame: *CallFrame, fun: value.Value) !void {
-        const closure = try object.Closure.init(fun.obj, self.heap);
-        for (0..closure.slots.len) |i| {
+        const closure_obj = try self.heap.makeClosure(fun.obj);
+        self.push(value.fromObject(closure_obj));
+        const closure = object.asClosure(closure_obj);
+        const slot_count = closure.slots.len;
+        closure.slots.len = 0;
+        for (0..slot_count) |i| {
             const is_local = frame.readByte();
             const index = frame.readByte();
-            closure.slots[i] = if (is_local == 1)
+            // creating the slot can trigger GC so we keep initialised slot count
+            // to only those we've initialised so far.
+            const slot = if (is_local == 1)
                 try self.captureUpvalue(&frame.slots[index])
             else
                 frame.callable.closure.slots[index];
+            closure.slots.len += 1;
+            closure.slots[i] = slot;
         }
-        self.push(value.asObject(try self.heap.makeClosure(closure)));
     }
 
     fn captureUpvalue(self: *Self, location: *value.Value) !*object.Obj {
         var prev_upvalue: ?*object.Obj = null;
         var curr_upvalue = self.open_upvalues;
         while (curr_upvalue) |upvalue| {
-            if (@intFromPtr(upvalue.data.upvalue.location) <= @intFromPtr(location)) break;
+            const upvalue_obj = object.asUpvalue(upvalue);
+            if (@intFromPtr(upvalue_obj.location) <= @intFromPtr(location)) break;
             prev_upvalue = curr_upvalue;
-            curr_upvalue = upvalue.data.upvalue.next;
+            curr_upvalue = upvalue_obj.next;
         }
         if (curr_upvalue) |upvalue| {
-            if (upvalue.data.upvalue.location == location) return upvalue;
+            if (object.asUpvalue(upvalue).location == location) return upvalue;
         }
         const upvalue = try self.heap.makeUpvalue(location);
-        upvalue.data.upvalue.next = curr_upvalue;
+        object.asUpvalue(upvalue).next = curr_upvalue;
         if (prev_upvalue) |p_upvalue| {
-            p_upvalue.data.upvalue.next = upvalue;
+            object.asUpvalue(p_upvalue).next = upvalue;
         } else {
             self.open_upvalues = upvalue;
         }
@@ -447,10 +465,11 @@ pub const VM = struct {
 
     fn closeUpvalues(self: *Self, last: *value.Value) void {
         while (self.open_upvalues) |upvalue| {
-            if (@intFromPtr(upvalue.data.upvalue.location) < @intFromPtr(last)) break;
-            upvalue.data.upvalue.closed = upvalue.data.upvalue.location.*;
-            upvalue.data.upvalue.location = &upvalue.data.upvalue.closed;
-            self.open_upvalues = upvalue.data.upvalue.next;
+            const upvalue_obj = object.asUpvalue(upvalue);
+            if (@intFromPtr(upvalue_obj.location) < @intFromPtr(last)) break;
+            upvalue_obj.closed = upvalue_obj.location.*;
+            upvalue_obj.location = &upvalue_obj.closed;
+            self.open_upvalues = upvalue_obj.next;
         }
     }
 
@@ -458,12 +477,12 @@ pub const VM = struct {
         if ((try self.pop()).withNumber()) |right| {
             if ((try self.pop()).withNumber()) |left| {
                 return switch (operator) {
-                    .Add => self.push(value.asNumber(left + right)),
-                    .Subtract => self.push(value.asNumber(left - right)),
-                    .Multiply => self.push(value.asNumber(left * right)),
-                    .Divide => self.push(value.asNumber(left / right)),
-                    .Less => self.push(value.asBoolean(left < right)),
-                    .Greater => self.push(value.asBoolean(left > right)),
+                    .Add => self.push(value.fromNumber(left + right)),
+                    .Subtract => self.push(value.fromNumber(left - right)),
+                    .Multiply => self.push(value.fromNumber(left * right)),
+                    .Divide => self.push(value.fromNumber(left / right)),
+                    .Less => self.push(value.fromBoolean(left < right)),
+                    .Greater => self.push(value.fromBoolean(left > right)),
                 };
             }
         }
@@ -537,10 +556,10 @@ pub const VM = struct {
     }
 
     fn bindMethod(self: *Self, class: *object.Obj, name: u24) !bool {
-        if (class.data.class.methods.get(name)) |method| {
+        if (object.asClass(class).methods.get(name)) |method| {
             const bound = try self.heap.makeMethod(self.peek(0).*, method.obj);
             _ = try self.pop();
-            self.push(value.asObject(bound));
+            self.push(value.fromObject(bound));
             return true;
         } else {
             return false;
@@ -564,7 +583,7 @@ pub const VM = struct {
     fn defineNative(self: *Self, comptime name: []const u8, arity: u8, function: object.NativeFn) !void {
         // If we don't get the name, then the native function is never referenced so no need to set.
         if (self.heap.name_map.get(name)) |name_index| {
-            self.push(value.asObject(try self.heap.makeNativeFunction(object.NativeFunction.init(name, arity, function))));
+            self.push(value.fromObject(try self.heap.makeNativeFunction(name, arity, function)));
             try self.globals.put(name_index, self.stack[self.stack_top - 1]);
             _ = try self.pop();
         }
@@ -575,7 +594,7 @@ fn sinNative(heap: *object.Heap, arg_count: u8, args: []value.Value) Interpreter
     _ = heap;
     _ = arg_count;
     if (args[0].withNumber()) |n| {
-        return value.asNumber(std.math.sin(n));
+        return value.fromNumber(std.math.sin(n));
     }
     return InterpreterError.InvalidArgument;
 }
@@ -584,7 +603,7 @@ fn cosNative(heap: *object.Heap, arg_count: u8, args: []value.Value) Interpreter
     _ = heap;
     _ = arg_count;
     if (args[0].withNumber()) |n| {
-        return value.asNumber(std.math.cos(n));
+        return value.fromNumber(std.math.cos(n));
     }
     return InterpreterError.InvalidArgument;
 }
@@ -594,7 +613,7 @@ fn sqrtNative(heap: *object.Heap, arg_count: u8, args: []value.Value) Interprete
     _ = arg_count;
     if (args[0].withNumber()) |n| {
         if (n >= 0) {
-            return value.asNumber(std.math.sqrt(n));
+            return value.fromNumber(std.math.sqrt(n));
         }
     }
     return InterpreterError.InvalidArgument;
@@ -604,7 +623,7 @@ fn clockNative(heap: *object.Heap, arg_count: u8, args: []value.Value) Interpret
     _ = heap;
     _ = arg_count;
     _ = args;
-    return value.asNumber(@floatFromInt(std.time.milliTimestamp()));
+    return value.fromNumber(@floatFromInt(std.time.milliTimestamp()));
 }
 
 fn stringNative(heap: *object.Heap, arg_count: u8, args: []value.Value) InterpreterError!value.Value {
@@ -622,5 +641,5 @@ fn stringNative(heap: *object.Heap, arg_count: u8, args: []value.Value) Interpre
 
     // Create and return the string object
     const string_obj = heap.copyString(formatted_str) catch return InterpreterError.RuntimeError;
-    return value.asObject(string_obj);
+    return value.fromObject(string_obj);
 }

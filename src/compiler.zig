@@ -367,7 +367,7 @@ const Compiler = struct {
                 return self.compileError("A class can't inherit from itself.");
             }
             try self.namedVariable(super_class_name);
-            
+
             // Create a new scope to bind 'super' as a local variable.
             // This allows methods in the subclass to reference the superclass
             // via the 'super' keyword, even in closures created within methods.
@@ -376,7 +376,7 @@ const Compiler = struct {
             self.fun.addLocal(object.SUPER) catch |err|
                 return self.handleFunctionError(err);
             try self.defineVariable(0); // 'super' is now a local variable pointing to superclass
-            
+
             try self.namedVariable(name);
             try self.emitCode(.Inherit); // Copy methods from superclass to subclass
             class_compiler.has_super = true;
@@ -408,10 +408,8 @@ const Compiler = struct {
     fn function(self: *Self, function_type: object.FunctionType, name: u24) CompileError!void {
         const outer_fun = self.fun;
         self.consume(.LeftParen, "Expect '(' after function name.");
-        const fun_obj = self.heap.makeFunction(
-            object.Function.init(self.heap, function_type, name, 0, outer_fun),
-        ) catch return CompileError.OutOfMemory;
-        self.fun = &fun_obj.data.function;
+        const fun_obj = self.heap.makeFunction(function_type, name, 0, outer_fun) catch return CompileError.OutOfMemory;
+        self.fun = object.asFunction(fun_obj);
         var inner_fun = self.fun;
         self.beginScope();
         if (!self.check(.RightParen)) {
@@ -435,9 +433,9 @@ const Compiler = struct {
         self.fun = outer_fun;
         const is_closure = inner_fun.upvalue_top > 0;
         if (is_closure) {
-            try self.emitClosure(value.asObject(fun_obj));
+            try self.emitClosure(value.fromObject(fun_obj));
         } else {
-            try self.emitConstant(value.asObject(fun_obj));
+            try self.emitConstant(value.fromObject(fun_obj));
         }
         for (inner_fun.upvalues[0..inner_fun.upvalue_top]) |upvalue| {
             try self.emitByte(if (upvalue.is_local) 1 else 0);
@@ -840,7 +838,7 @@ fn number(c: *Compiler) CompileError!void {
         c.errorAtCurrent("Unable to parse 64bit float.");
         return;
     };
-    try c.emitConstant(value.asNumber(val));
+    try c.emitConstant(value.fromNumber(val));
 }
 
 fn grouping(c: *Compiler) CompileError!void {
@@ -896,7 +894,7 @@ fn binary(c: *Compiler) CompileError!void {
 fn string(c: *Compiler) CompileError!void {
     const str = c.parser.previous.start[1 .. c.parser.previous.len - 1];
     const strObj = c.heap.copyString(str) catch return CompileError.OutOfMemory;
-    try c.emitConstant(value.asObject(strObj));
+    try c.emitConstant(value.fromObject(strObj));
 }
 
 fn variable(c: *Compiler) CompileError!void {
@@ -967,19 +965,14 @@ fn super(c: *Compiler) CompileError!void {
     }
 }
 
-pub fn compile(heap: *object.Heap, source: []const u8) CompileError!object.Function {
+pub fn compile(heap: *object.Heap, source: []const u8) CompileError!*object.Obj {
     const script_name: u24 = heap.makeIdentifier(SCRIPT_NAME) catch return CompileError.OutOfMemory;
-    var function = object.Function.init(
-        heap,
-        .Script,
-        script_name,
-        0,
-        null,
-    );
-    var compiler = try Compiler.init(heap, source, &function);
+    const function_obj = heap.makeFunction(.Script, script_name, 0, null) catch return CompileError.OutOfMemory;
+    const function = object.asFunction(function_obj);
+    var compiler = try Compiler.init(heap, source, function);
     defer compiler.deinit();
     try compiler.run();
     if (compiler.err) |err| return err;
 
-    return function;
+    return function_obj;
 }
