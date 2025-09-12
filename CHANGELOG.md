@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.2] - 2025-09-12
+
+### Changed
+- **Object API Refactoring**: Complete optimization of object casting interface for improved code maintainability
+  - **Method-Based Casting**: Moved casting methods from module-level functions to Obj struct methods
+    - Changed from `object.asString(obj)` to `obj.asString()` for cleaner, more intuitive API
+    - All casting methods (asString, asFunction, asClosure, etc.) now available directly on Obj instances
+    - Maintained complete type safety with debug assertions and compile-time validation
+  - **Simplified Implementation**: Replaced @fieldParentPtr with @ptrCast for casting operations
+    - Leverages fact that .obj is always the first field in object structs
+    - Reduced implementation complexity while maintaining equivalent performance
+    - Cleaner code with improved readability throughout codebase
+  - **Comprehensive Updates**: Updated all object access patterns throughout VM, compiler, and debug modules
+    - Zero functional changes - pure API improvement refactoring
+    - All existing functionality preserved with enhanced maintainability
+
+### Performance Analysis
+- **zlox vs clox Performance Comparison**: Comprehensive analysis of 2x performance gap between implementations
+  - **Architectural Differences**: C uses global VM vs Zig passing self parameter adds overhead
+  - **Inlining Characteristics**: C inlines operations in switch cases vs Zig using function calls
+  - **Property Cache Impact**: Cache overhead hurts alternating access patterns in object-heavy code
+  - **Operation Abstraction**: Long operations use function calls vs C macros for direct execution
+  - **Performance Characteristics**: Analysis documents why Zig implementation has different performance profile
+- **API Optimization Results**: Refactoring maintains performance while significantly improving code quality
+  - Method-based API provides cleaner interface without performance degradation
+  - Simplified casting implementation reduces complexity without sacrificing type safety
+  - Enhanced maintainability supports future optimization efforts
+
+### Technical Implementation Details
+- **Object Casting System**: All casting methods moved to Obj struct with consistent interface
+  - `obj.asString()`, `obj.asFunction()`, `obj.asClosure()`, `obj.asClass()`, etc.
+  - Type safety maintained through debug assertions and compile-time checks
+  - @ptrCast implementation simpler and equivalent to @fieldParentPtr approach
+- **Codebase Integration**: Systematic update of object access patterns across entire project
+  - VM execution: Updated all object access in instruction handling and stack management
+  - Compiler: Updated object creation and access in function compilation and variable handling
+  - Debug: Updated disassembler and instruction printing with new casting methods
+- **Zero Functional Impact**: Pure refactoring with no changes to language semantics or execution behavior
+  - All tests continue to pass with identical functionality
+  - Performance characteristics preserved with enhanced code maintainability
+
+### Quality Improvements
+- **Code Maintainability**: Method-based API provides more intuitive and discoverable interface
+- **Type Safety**: Maintained complete type safety while simplifying implementation
+- **Performance Documentation**: Comprehensive analysis of performance characteristics vs reference implementation
+- **API Consistency**: Unified object interface reduces cognitive load and improves developer experience
+
 ## [0.30.1] - 2025-09-11
 
 ### Added
