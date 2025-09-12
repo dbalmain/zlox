@@ -112,7 +112,7 @@ pub const VM = struct {
         var maybe_upvalue = self.open_upvalues;
         while (maybe_upvalue) |upvalue| {
             upvalue.mark();
-            maybe_upvalue = object.asUpvalue(upvalue).next;
+            maybe_upvalue = upvalue.asUpvalue().next;
         }
     }
 
@@ -125,7 +125,7 @@ pub const VM = struct {
         self.heap.setVm(self);
 
         // Now call the function from the heap object
-        try self.call(object.Callable{ .function = object.asFunction(self.stack[0].asObject()) }, 0);
+        try self.call(object.Callable{ .function = self.stack[0].asObject().asFunction() }, 0);
         const stdout = std.io.getStdOut().writer();
         var frame = &self.frames[self.frames_top - 1];
         var previous_line: u24 = 0;
@@ -245,11 +245,11 @@ pub const VM = struct {
                 .ClosureLong => try self.makeClosure(frame, frame.readLongConstant()),
                 .GetUpvalue => {
                     const slot = frame.readByte();
-                    self.push(object.asUpvalue(frame.callable.closure.slots[slot]).location.*);
+                    self.push(frame.callable.closure.slots[slot].asUpvalue().location.*);
                 },
                 .SetUpvalue => {
                     const slot = frame.readByte();
-                    object.asUpvalue(frame.callable.closure.slots[slot]).location.* = self.peek(0).*;
+                    frame.callable.closure.slots[slot].asUpvalue().location.* = self.peek(0).*;
                 },
                 .CloseUpvalue => {
                     self.closeUpvalues(&self.stack[self.stack_top - 1]);
@@ -314,7 +314,7 @@ pub const VM = struct {
         if (callee.withObject()) |obj| {
             switch (obj.obj_type) {
                 .class => {
-                    const class = object.asClass(obj);
+                    const class = obj.asClass();
                     self.stack[self.stack_top - arg_count - 1] =
                         value.fromObject(try self.heap.makeInstance(obj));
                     if (class.methods.get(object.INIT)) |*initialiser| {
@@ -325,19 +325,19 @@ pub const VM = struct {
                     return;
                 },
                 .closure => {
-                    const closure = object.asClosure(obj);
+                    const closure = obj.asClosure();
                     return self.call(object.Callable{ .closure = closure }, arg_count);
                 },
                 .function => {
-                    const fun = object.asFunction(obj);
+                    const fun = obj.asFunction();
                     return self.call(object.Callable{ .function = fun }, arg_count);
                 },
                 .native_function => {
-                    const fun = object.asNativeFunction(obj);
+                    const fun = obj.asNativeFunction();
                     return self.nativeCall(fun, arg_count);
                 },
                 .bound_method => {
-                    const method = object.asBoundMethod(obj);
+                    const method = obj.asBoundMethod();
                     self.stack[self.stack_top - arg_count - 1] = method.receiver;
                     return try self.callValue(&value.fromObject(method.method), arg_count);
                 },
@@ -382,7 +382,7 @@ pub const VM = struct {
                 self.stack[self.stack_top - arg_count - 1] = fun;
                 return self.callValue(&fun, arg_count);
             }
-            return self.invokeFromClass(object.asClass(instance.class), name, arg_count);
+            return self.invokeFromClass(instance.class.asClass(), name, arg_count);
         } else {
             return self.runtimeError("Only instances have methods.", .{});
         }
@@ -417,7 +417,7 @@ pub const VM = struct {
 
     fn addMethod(self: *Self, name: u24) !void {
         const method = self.peek(0);
-        var class = object.asClass(self.peek(1).asObject());
+        var class = self.peek(1).asObject().asClass();
         try class.methods.put(name, method.*);
         _ = try self.pop();
     }
@@ -425,7 +425,7 @@ pub const VM = struct {
     fn makeClosure(self: *Self, frame: *CallFrame, fun: value.Value) !void {
         const closure_obj = try self.heap.makeClosure(fun.asObject());
         self.push(value.fromObject(closure_obj));
-        const closure = object.asClosure(closure_obj);
+        const closure = closure_obj.asClosure();
         const slot_count = closure.slots.len;
         closure.slots.len = 0;
         for (0..slot_count) |i| {
@@ -446,18 +446,18 @@ pub const VM = struct {
         var prev_upvalue: ?*object.Obj = null;
         var curr_upvalue = self.open_upvalues;
         while (curr_upvalue) |upvalue| {
-            const upvalue_obj = object.asUpvalue(upvalue);
+            const upvalue_obj = upvalue.asUpvalue();
             if (@intFromPtr(upvalue_obj.location) <= @intFromPtr(location)) break;
             prev_upvalue = curr_upvalue;
             curr_upvalue = upvalue_obj.next;
         }
         if (curr_upvalue) |upvalue| {
-            if (object.asUpvalue(upvalue).location == location) return upvalue;
+            if (upvalue.asUpvalue().location == location) return upvalue;
         }
         const upvalue = try self.heap.makeUpvalue(location);
-        object.asUpvalue(upvalue).next = curr_upvalue;
+        upvalue.asUpvalue().next = curr_upvalue;
         if (prev_upvalue) |p_upvalue| {
-            object.asUpvalue(p_upvalue).next = upvalue;
+            p_upvalue.asUpvalue().next = upvalue;
         } else {
             self.open_upvalues = upvalue;
         }
@@ -466,7 +466,7 @@ pub const VM = struct {
 
     fn closeUpvalues(self: *Self, last: *value.Value) void {
         while (self.open_upvalues) |upvalue| {
-            const upvalue_obj = object.asUpvalue(upvalue);
+            const upvalue_obj = upvalue.asUpvalue();
             if (@intFromPtr(upvalue_obj.location) < @intFromPtr(last)) break;
             upvalue_obj.closed = upvalue_obj.location.*;
             upvalue_obj.location = &upvalue_obj.closed;
@@ -557,7 +557,7 @@ pub const VM = struct {
     }
 
     fn bindMethod(self: *Self, class: *object.Obj, name: u24) !bool {
-        if (object.asClass(class).methods.get(name)) |method| {
+        if (class.asClass().methods.get(name)) |method| {
             const bound = try self.heap.makeMethod(self.peek(0).*, method.asObject());
             _ = try self.pop();
             self.push(value.fromObject(bound));

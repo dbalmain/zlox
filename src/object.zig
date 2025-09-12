@@ -55,14 +55,14 @@ pub const Obj = struct {
     next: ?*Obj,
     pub fn print(self: *Obj, writer: anytype) !void {
         switch (self.obj_type) {
-            .class => try asClass(self).print(writer),
-            .closure => try asClosure(self).print(writer),
-            .function => try asFunction(self).print(writer),
-            .instance => try asInstance(self).print(writer),
+            .class => try self.asClass().print(writer),
+            .closure => try self.asClosure().print(writer),
+            .function => try self.asFunction().print(writer),
+            .instance => try self.asInstance().print(writer),
             .native_function => try writer.print("<native fn>", .{}),
-            .string => try writer.print("{s}", .{asString(self).chars}),
+            .string => try writer.print("{s}", .{self.asString().chars}),
             .upvalue => try writer.print("upvalue", .{}),
-            .bound_method => try asBoundMethod(self).method.print(writer),
+            .bound_method => try self.asBoundMethod().method.print(writer),
         }
     }
 
@@ -84,8 +84,8 @@ pub const Obj = struct {
 
     pub fn add(self: *const Obj, heap: *Heap, other: *const Obj) !*Obj {
         if (self.obj_type == .string and other.obj_type == .string) {
-            const s1 = asString(@constCast(self));
-            const s2 = asString(@constCast(other));
+            const s1 = @constCast(self).asString();
+            const s2 = @constCast(other).asString();
             return heap.takeString(try std.mem.concat(heap.allocator, u8, &.{ s1.chars, s2.chars }));
         }
         return Error.TypeMismatch;
@@ -100,16 +100,57 @@ pub const Obj = struct {
             }
             self.is_marked = true;
             switch (self.obj_type) {
-                .class => asClass(self).mark(),
-                .instance => asInstance(self).mark(),
-                .closure => asClosure(self).mark(),
-                .function => asFunction(self).mark(),
-                .upvalue => asUpvalue(self).mark(),
-                .bound_method => asBoundMethod(self).mark(),
+                .class => self.asClass().mark(),
+                .instance => self.asInstance().mark(),
+                .closure => self.asClosure().mark(),
+                .function => self.asFunction().mark(),
+                .upvalue => self.asUpvalue().mark(),
+                .bound_method => self.asBoundMethod().mark(),
                 .string => {},
                 .native_function => {},
             }
         }
+    }
+
+    // Type-safe casting methods
+    pub fn asString(self: *Obj) *String {
+        std.debug.assert(self.obj_type == .string);
+        return @ptrCast(self);
+    }
+
+    pub fn asFunction(self: *Obj) *Function {
+        std.debug.assert(self.obj_type == .function);
+        return @ptrCast(self);
+    }
+
+    pub fn asNativeFunction(self: *Obj) *NativeFunction {
+        std.debug.assert(self.obj_type == .native_function);
+        return @ptrCast(self);
+    }
+
+    pub fn asClosure(self: *Obj) *Closure {
+        std.debug.assert(self.obj_type == .closure);
+        return @ptrCast(self);
+    }
+
+    pub fn asUpvalue(self: *Obj) *ObjUpvalue {
+        std.debug.assert(self.obj_type == .upvalue);
+        return @ptrCast(self);
+    }
+
+    pub fn asClass(self: *Obj) *Class {
+        std.debug.assert(self.obj_type == .class);
+        return @ptrCast(self);
+    }
+
+    pub fn asInstance(self: *Obj) *Instance {
+        std.debug.assert(self.obj_type == .instance);
+        return @ptrCast(self);
+    }
+
+    pub fn asBoundMethod(self: *Obj) *BoundMethod {
+        std.debug.assert(self.obj_type == .bound_method);
+        return @ptrCast(self);
     }
 };
 
@@ -238,7 +279,7 @@ pub const Closure = struct {
     }
 
     pub fn fun(self: *const Self) *Function {
-        return asFunction(self.function);
+        return self.function.asFunction();
     }
 
     pub fn mark(self: *Self) void {
@@ -332,7 +373,7 @@ pub const Instance = struct {
     }
 
     pub fn print(self: *Self, writer: anytype) !void {
-        try writer.print("{s} instance", .{asClass(self.class).name()});
+        try writer.print("{s} instance", .{self.class.asClass().name()});
     }
 };
 
@@ -352,47 +393,6 @@ pub const BoundMethod = struct {
         _ = self;
     }
 };
-
-// Type-safe casting functions - like C casts but with runtime checks
-pub fn asString(obj: *Obj) *String {
-    std.debug.assert(obj.obj_type == .string);
-    return @fieldParentPtr("obj", obj);
-}
-
-pub fn asFunction(obj: *Obj) *Function {
-    std.debug.assert(obj.obj_type == .function);
-    return @fieldParentPtr("obj", obj);
-}
-
-pub fn asNativeFunction(obj: *Obj) *NativeFunction {
-    std.debug.assert(obj.obj_type == .native_function);
-    return @fieldParentPtr("obj", obj);
-}
-
-pub fn asClosure(obj: *Obj) *Closure {
-    std.debug.assert(obj.obj_type == .closure);
-    return @fieldParentPtr("obj", obj);
-}
-
-pub fn asUpvalue(obj: *Obj) *ObjUpvalue {
-    std.debug.assert(obj.obj_type == .upvalue);
-    return @fieldParentPtr("obj", obj);
-}
-
-pub fn asClass(obj: *Obj) *Class {
-    std.debug.assert(obj.obj_type == .class);
-    return @fieldParentPtr("obj", obj);
-}
-
-pub fn asInstance(obj: *Obj) *Instance {
-    std.debug.assert(obj.obj_type == .instance);
-    return @fieldParentPtr("obj", obj);
-}
-
-pub fn asBoundMethod(obj: *Obj) *BoundMethod {
-    std.debug.assert(obj.obj_type == .bound_method);
-    return @fieldParentPtr("obj", obj);
-}
 
 // Error types
 pub const Error = error{
@@ -527,7 +527,7 @@ pub const Heap = struct {
     }
 
     pub fn makeClosure(self: *Self, function: *Obj) !*Obj {
-        const obj_function = asFunction(function);
+        const obj_function = function.asFunction();
         const obj_closure = try self.allocateObject(Closure, .closure);
         obj_closure.function = function;
         obj_closure.slots = try self.allocator.alloc(*Obj, obj_function.upvalue_top);
@@ -605,43 +605,43 @@ pub const Heap = struct {
 
         switch (obj.obj_type) {
             .bound_method => {
-                const bound_method = asBoundMethod(obj);
+                const bound_method = obj.asBoundMethod();
                 bound_method.deinit();
                 self.allocator.destroy(bound_method);
             },
             .class => {
-                const class = asClass(obj);
+                const class = obj.asClass();
                 class.deinit();
                 self.allocator.destroy(class);
             },
             .closure => {
-                const closure = asClosure(obj);
+                const closure = obj.asClosure();
                 closure.deinit();
                 self.allocator.destroy(closure);
             },
             .function => {
-                const function = asFunction(obj);
+                const function = obj.asFunction();
                 function.deinit();
                 self.allocator.destroy(function);
             },
             .instance => {
-                const instance = asInstance(obj);
+                const instance = obj.asInstance();
                 instance.deinit();
                 self.allocator.destroy(instance);
             },
             .native_function => {
-                const native = asNativeFunction(obj);
+                const native = obj.asNativeFunction();
                 native.deinit();
                 self.allocator.destroy(native);
             },
             .string => {
-                const str = asString(obj);
+                const str = obj.asString();
                 _ = self.interned_strings.remove(str.chars);
                 str.deinit(self.allocator);
                 self.allocator.destroy(str);
             },
             .upvalue => {
-                const upvalue = asUpvalue(obj);
+                const upvalue = obj.asUpvalue();
                 self.allocator.destroy(upvalue);
             },
         }

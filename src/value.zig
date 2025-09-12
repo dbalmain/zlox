@@ -79,20 +79,20 @@ pub const Value = extern struct {
     pub fn withClass(self: Self) ?*object.Class {
         if (!self.isObj()) return null;
         const obj = self.asObject();
-        return if (obj.obj_type == .class) object.asClass(obj) else null;
+        return if (obj.obj_type == .class) obj.asClass() else null;
     }
 
     pub fn withInstance(self: Self) ?*object.Instance {
         if (!self.isObj()) return null;
         const obj = self.asObject();
-        return if (obj.obj_type == .instance) object.asInstance(obj) else null;
+        return if (obj.obj_type == .instance) obj.asInstance() else null;
     }
 
     pub fn asStringChars(self: Self) []const u8 {
         std.debug.assert(self.isObj());
         const obj = self.asObject();
         std.debug.assert(obj.obj_type == .string);
-        return object.asString(obj).chars;
+        return obj.asString().chars;
     }
 
     // Equality comparison

@@ -141,7 +141,7 @@ fn closureInstruction(self: *const chunk.Chunk, start_offset: usize, is_long: bo
     const function_value = self.constants.values.items[constant];
     try function_value.print(std.io.getStdErr().writer());
     std.debug.print("\n", .{});
-    const function = object.asFunction(function_value.obj);
+    const function = function_value.obj.asFunction();
     for (0..function.upvalue_top) |_| {
         const is_local = self.code.items[offset];
         const index = self.code.items[offset + 1];

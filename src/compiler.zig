@@ -409,7 +409,7 @@ const Compiler = struct {
         const outer_fun = self.fun;
         self.consume(.LeftParen, "Expect '(' after function name.");
         const fun_obj = self.heap.makeFunction(function_type, name, 0, outer_fun) catch return CompileError.OutOfMemory;
-        self.fun = object.asFunction(fun_obj);
+        self.fun = fun_obj.asFunction();
         var inner_fun = self.fun;
         self.beginScope();
         if (!self.check(.RightParen)) {
@@ -968,7 +968,7 @@ fn super(c: *Compiler) CompileError!void {
 pub fn compile(heap: *object.Heap, source: []const u8) CompileError!*object.Obj {
     const script_name: u24 = heap.makeIdentifier(SCRIPT_NAME) catch return CompileError.OutOfMemory;
     const function_obj = heap.makeFunction(.Script, script_name, 0, null) catch return CompileError.OutOfMemory;
-    const function = object.asFunction(function_obj);
+    const function = function_obj.asFunction();
     var compiler = try Compiler.init(heap, source, function);
     defer compiler.deinit();
     try compiler.run();
