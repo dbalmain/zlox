@@ -58,10 +58,11 @@ pub fn disassembleInstruction(self: *const chunk.Chunk, offset: usize, line: ?us
         .SetUpvalue,
         => return variableInstruction(self, offset, instruction),
         .Break,
+        .Loop,
+        => return jumpInstruction(self, -1, offset, instruction),
         .Jump,
         .JumpIfFalse,
-        .Loop,
-        => return shortVariableInstruction(self, offset, instruction),
+        => return jumpInstruction(self, 1, offset, instruction),
         .Closure,
         => return closureInstruction(self, offset, false),
         .ClosureLong,
@@ -105,9 +106,9 @@ fn variableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCo
     return offset + 2;
 }
 
-fn shortVariableInstruction(self: *const chunk.Chunk, offset: usize, code: chunk.OpCode) !usize {
+fn jumpInstruction(self: *const chunk.Chunk, comptime sign: isize, offset: usize, code: chunk.OpCode) !usize {
     const jump: u16 = @as(u16, self.code.items[offset + 1]) << 8 | self.code.items[offset + 2];
-    std.debug.print("{s:<18} {d:>4}\n", .{ @tagName(code), jump });
+    std.debug.print("{s:<18} {d:>4} -> {d}\n", .{ @tagName(code), offset, @as(isize, @intCast(offset)) + 3 + @as(isize, jump) * sign });
     return offset + 3;
 }
 
@@ -141,7 +142,7 @@ fn closureInstruction(self: *const chunk.Chunk, start_offset: usize, is_long: bo
     const function_value = self.constants.values.items[constant];
     try function_value.print(std.io.getStdErr().writer());
     std.debug.print("\n", .{});
-    const function = function_value.obj.asFunction();
+    const function = function_value.asObject().asFunction();
     for (0..function.upvalue_top) |_| {
         const is_local = self.code.items[offset];
         const index = self.code.items[offset + 1];
